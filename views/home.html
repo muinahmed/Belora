@@ -1,58 +1,39 @@
-<header class="site-header">
-  <div class="container nav">
-    <a class="brand" href="/">Spark <span>Corner</span></a>
-    <nav>
-      <a href="/products">Shop</a>
-      <a href="#about">About</a>
-      <a href="#contact">Contact</a>
-      <a class="cart-link" href="/cart">Cart</a>
-    </nav>
-  </div>
-</header>
+{{HEADER}}
 
-<main>
+<main id="main-content">
   <section class="hero">
-    <div class="container hero-grid">
-      <div>
-        <p class="eyebrow">Spark Corner</p>
-        <h1>Simple things. Beautiful choices.</h1>
-        <p class="hero-text">Discover products selected for everyday style, gifting and little moments that matter.</p>
-        <a class="btn" href="/products">Shop the collection</a>
-      </div>
-      <div class="hero-card">
-        <div class="hero-card-inner">
-          <span>NEW COLLECTION</span>
-          <strong>Find something<br>you'll love.</strong>
+    <picture>
+      <source media="(max-width: 620px)" srcset="/images/hero-mobile.jpg">
+      <img class="hero-image" src="/images/beauty-hero-banner.png" alt="A gold pearl pendant and pearl earrings on travertine stone, beside rose-pink face cream and a rose-gold lipstick" fetchpriority="high">
+    </picture>
+    <div class="wrap hero-inner">
+      <div class="hero-copy">
+        <p class="hero-kicker">Jewellery, makeup and skincare</p>
+        <h1>Beauty, finished in gold.</h1>
+        <p class="hero-text">Pieces and formulas chosen one by one, for the everyday rituals you return to. Delivered anywhere in Bangladesh.</p>
+        <div class="hero-actions">
+          <a class="btn btn-dark" href="/collections/jewellery">Shop jewellery</a>
+          <a class="btn btn-ghost" href="/products?sort=newest">New arrivals</a>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="section" id="shop">
-    <div class="container">
-      <div class="page-title page-title-row">
-        <div><p class="eyebrow">Featured</p><h2>Popular products</h2></div>
-        <a href="/products">View all →</a>
-      </div>
-      <div class="product-grid">{{PRODUCTS}}</div>
+  <section class="collections" aria-labelledby="collections-title">
+    <div class="wrap">
+      <h2 id="collections-title" class="visually-hidden">Shop by collection</h2>
+      <div class="collection-tiles">{{COLLECTION_TILES}}</div>
     </div>
   </section>
 
-  <section class="section soft" id="about">
-    <div class="container narrow">
-      <p class="eyebrow">About us</p>
-      <h2>A small shop with a big focus on quality.</h2>
-      <p>Welcome to Spark Corner. We keep the shopping experience simple: clear products, easy checkout and friendly delivery.</p>
-    </div>
-  </section>
+  {{NEW_ARRIVALS}}
+  {{SALE_BANNER}}
+  {{BESTSELLERS}}
+  {{FEATURED}}
 
-  <section class="section" id="contact">
-    <div class="container narrow">
-      <p class="eyebrow">Contact</p>
-      <h2>Need help?</h2>
-      <p>Use the contact details provided by the shop owner for product questions and delivery support.</p>
-    </div>
+  <section class="assurance" aria-label="Delivery and payment">
+    <div class="wrap assurance-grid">{{ASSURANCE}}</div>
   </section>
 </main>
 
-<footer><div class="container">© Spark Corner</div></footer>
+{{FOOTER}}

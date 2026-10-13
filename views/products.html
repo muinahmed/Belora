@@ -1,29 +1,52 @@
-<header class="site-header">
-  <div class="container nav">
-    <a class="brand" href="/">Spark <span>Corner</span></a>
-    <nav><a class="active" href="/products">Shop</a><a href="/#about">About</a><a href="/#contact">Contact</a><a class="cart-link" href="/cart">Cart</a></nav>
-  </div>
-</header>
+{{HEADER}}
 
-<main class="container section">
-  <div class="page-title">
-    <p class="eyebrow">Collection</p>
-    <h1>Shop</h1>
-  </div>
-
-  <form class="search-bar" method="GET" action="/products">
-    <input name="q" value="{{SEARCH}}" placeholder="Search products...">
-    <button class="btn" type="submit">Search</button>
-  </form>
-
-  <div class="category-links">
-    <a href="/products">All</a>
-    {{CATEGORIES}}
+<main id="main-content">
+  <div class="listing-head">
+    <div class="wrap">
+      {{BREADCRUMBS}}
+      <h1>{{TITLE}}</h1>
+      <p class="listing-intro">{{INTRO}}</p>
+      {{SUBCATEGORIES}}
+    </div>
   </div>
 
-  <div class="product-grid">{{PRODUCTS}}</div>
+  <div class="wrap listing-layout">
+    <details class="filters-panel" {{FILTERS_OPEN}}>
+      <summary>Filters{{ACTIVE_FILTER_COUNT}}</summary>
+      <form class="filter-form" method="GET" action="{{FORM_ACTION}}">
+        {{HIDDEN_FIELDS}}
+        <div class="filters-head"><h2>Filters</h2><a href="{{CLEAR_HREF}}">Clear all</a></div>
+        {{FILTER_GROUPS}}
+        <button class="btn btn-dark full" type="submit">Show results</button>
+      </form>
+    </details>
 
-{{PAGINATION}}
+    <section class="listing-results" aria-labelledby="results-count">
+      <div class="results-bar">
+        <p id="results-count">{{RESULTS_TEXT}}</p>
+        <form method="GET" action="{{FORM_ACTION}}" class="sort-form">
+          {{SORT_HIDDEN_FIELDS}}
+          <label for="sort">Sort</label>
+          <select id="sort" name="sort">{{SORT_OPTIONS}}</select>
+          <noscript><button class="btn btn-small" type="submit">Sort</button></noscript>
+        </form>
+      </div>
+      {{PRODUCTS}}
+      {{PAGINATION}}
+    </section>
+  </div>
 </main>
 
-<footer><div class="container">© Spark Corner</div></footer>
+{{FOOTER}}
+
+<script>
+  document.querySelector(".sort-form select")?.addEventListener("change", (event) => event.target.form.submit());
+  document.querySelectorAll(".filter-form input[type=radio], .filter-form input[type=checkbox]").forEach((input) => {
+    input.addEventListener("change", () => input.form.submit());
+  });
+  const filtersPanel = document.querySelector(".filters-panel");
+  const desktop = window.matchMedia("(min-width: 901px)");
+  const syncFilters = () => { if (desktop.matches) filtersPanel.open = true; };
+  desktop.addEventListener("change", syncFilters);
+  syncFilters();
+</script>

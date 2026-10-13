@@ -3,13 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Admin Login — Spark Corner</title>
+  <title>Admin login — Bellora BD</title>
+  <link rel="icon" href="/images/bellora-icon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/images/bellora-icon.png">
+  <meta name="robots" content="noindex">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..700;1,6..96,400..600&family=Jost:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body class="login-page">
-  <main class="login-card">
-    <a class="brand" href="/">Spark <span>Corner</span></a>
-    <p class="eyebrow">Administration</p>
+  <main id="main-content" class="login-card">
+    <a class="wordmark" href="/" aria-label="Bellora home"><img src="/images/bellora-logo.png" alt="Bellora" width="900" height="272"></a>
+    <p class="admin-kicker">Staff only</p>
     <h1>Admin login</h1>
     {{ERROR}}
     <form method="POST" action="/admin/login">
@@ -17,7 +21,6 @@
       <label>Password<input type="password" name="password" required></label>
       <button class="btn full" type="submit">Login</button>
     </form>
-    <p class="muted">Development login: admin / admin123</p>
   </main>
 </body>
 </html>

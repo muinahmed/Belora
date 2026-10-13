@@ -1,2 +1,18 @@
-database/shop.sqlite
+# Environment secrets
+.env
+.env.*
+
+# Allow the example configuration
+!.env.example
+
+# SQLite databases and backups
+database/*.sqlite
+database/*.sqlite-*
+database/*.db
+database/*.db-*
+
+# Uploaded product files
 public/uploads/products/*
+
+# Deno dependencies
+node_modules/

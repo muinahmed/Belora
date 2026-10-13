@@ -1,35 +1,73 @@
-<header class="site-header">
-  <div class="container nav">
-    <a class="brand" href="/">Spark <span>Corner</span></a>
-    <nav><a href="/products">Shop</a><a href="/#about">About</a><a href="/#contact">Contact</a><a class="cart-link" href="/cart">Cart</a></nav>
-  </div>
-</header>
+{{HEADER}}
 
-<main class="container section">
-  <div class="page-title"><p class="eyebrow">Almost there</p><h1>Checkout</h1></div>
+<main id="main-content" class="wrap checkout-page">
+  {{BREADCRUMBS}}
+  <h1>Checkout</h1>
   <div class="checkout-grid">
-    <form class="panel" method="POST" action="/checkout">
-      <h2>Your details</h2>
-      <label>Full name *<input name="customer_name" required></label>
-      <label>Phone *<input name="phone" required></label>
-      <label>Email<input type="email" name="email"></label>
-      <label>Delivery address *<textarea name="address" required></textarea></label>
-      <label>Payment method *
-        <select name="payment_method" required>
-          <option value="Cash on Delivery">Cash on Delivery</option>
-          <option value="bKash">bKash</option>
-          <option value="Nagad">Nagad</option>
-        </select>
-      </label>
-      <button class="btn full" type="submit">Place order</button>
+    <form class="checkout-form" method="POST" action="/checkout">
+      <fieldset>
+        <legend>Your details</legend>
+        <label>Full name<input name="customer_name" autocomplete="name" required></label>
+        <div class="field-pair">
+          <label>Phone<input name="phone" type="tel" inputmode="tel" autocomplete="tel" required></label>
+          <label>Confirm phone<input name="phone_confirmation" type="tel" inputmode="tel" autocomplete="tel" required></label>
+        </div>
+        <label>Email <span class="optional">(optional)</span><input type="email" name="email" autocomplete="email"></label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Delivery</legend>
+        <label>Delivery address<textarea name="address" autocomplete="street-address" rows="3" required></textarea></label>
+        <label>District or city
+          <select name="district" required>
+            <option value="" disabled selected>Select your district or city</option>
+            {{DISTRICT_OPTIONS}}
+          </select>
+        </label>
+        <div class="choice-group" role="radiogroup" aria-label="Delivery area">
+          <label class="choice"><input type="radio" name="delivery_area" value="Inside Dhaka" data-charge="{{INSIDE_CHARGE}}" checked><span><b>Inside Dhaka</b><small>৳{{INSIDE_CHARGE}}</small></span></label>
+          <label class="choice"><input type="radio" name="delivery_area" value="Outside Dhaka" data-charge="{{OUTSIDE_CHARGE}}"><span><b>Outside Dhaka</b><small>৳{{OUTSIDE_CHARGE}}</small></span></label>
+        </div>
+        <label>Order note <span class="optional">(optional)</span><textarea name="order_notes" rows="2" placeholder="Shade preference, delivery instructions or a gift note"></textarea></label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Payment</legend>
+        <div class="choice-group choice-stack" role="radiogroup" aria-label="Payment method">
+          <label class="choice"><input type="radio" name="payment_method" value="Cash on Delivery" checked><span><b>Cash on delivery</b><small>Pay when your order arrives</small></span></label>
+          <label class="choice"><input type="radio" name="payment_method" value="bKash"><span><b>bKash</b><small>Mobile payment</small></span></label>
+          <label class="choice"><input type="radio" name="payment_method" value="Nagad"><span><b>Nagad</b><small>Mobile payment</small></span></label>
+        </div>
+      </fieldset>
+
+      <button class="btn btn-dark full" type="submit">Place order</button>
     </form>
 
-    <aside class="panel">
-      <h2>Your order</h2>
-      <ul class="order-list">{{ITEMS}}</ul>
-      <div class="total-line"><span>Total</span><strong>৳{{TOTAL}}</strong></div>
+    <aside class="summary" aria-labelledby="summary-title">
+      <h2 id="summary-title">Order summary</h2>
+      <ul class="summary-items">{{ITEMS}}</ul>
+      <dl class="summary-lines">
+        <div><dt>Subtotal</dt><dd>{{SUBTOTAL_DISPLAY}}</dd></div>
+        <div><dt>Delivery</dt><dd id="delivery-charge">৳{{INSIDE_CHARGE}}</dd></div>
+        <div class="summary-total"><dt>Total</dt><dd id="checkout-total" data-subtotal="{{SUBTOTAL}}">{{SUBTOTAL_DISPLAY}}</dd></div>
+      </dl>
     </aside>
   </div>
 </main>
 
-<footer><div class="container">© Spark Corner</div></footer>
+{{FOOTER}}
+
+<script>
+  const total = document.querySelector("#checkout-total");
+  const deliveryCharge = document.querySelector("#delivery-charge");
+  const format = (value) => { const decimals = Number.isInteger(Math.round(value * 100) / 100) ? 0 : 2; return `৳${value.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`; };
+  const updateTotal = () => {
+    const area = document.querySelector("input[name='delivery_area']:checked");
+    const charge = Number(area?.dataset.charge || 0);
+    const subtotal = Number.parseFloat(total.dataset.subtotal);
+    deliveryCharge.textContent = format(charge);
+    total.textContent = Number.isFinite(subtotal) ? format(subtotal + charge) : "Total unavailable";
+  };
+  document.querySelectorAll("input[name='delivery_area']").forEach((input) => input.addEventListener("change", updateTotal));
+  updateTotal();
+</script>

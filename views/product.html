@@ -1,45 +1,89 @@
-<header class="site-header">
-  <div class="container nav">
-    <a class="brand" href="/">Spark <span>Corner</span></a>
-    <nav><a class="active" href="/products">Shop</a><a href="/#about">About</a><a href="/#contact">Contact</a><a class="cart-link" href="/cart">Cart</a></nav>
-  </div>
-</header>
+{{HEADER}}
 
-<main class="container section">
-  <a class="back-link" href="/products">← Back to shop</a>
-  <div class="detail-grid">
-    <div class="product-gallery">
-  <div class="detail-image">{{IMAGE}}</div>
-  <div class="product-thumbnails">{{IMAGES}}</div>
-</div>
-    <div class="detail-info">
-      <p class="eyebrow">{{CATEGORY}}</p>
+<main id="main-content" class="wrap product-page">
+  {{BREADCRUMBS}}
+  <div class="pd-grid">
+    <div class="pd-gallery">
+      <div class="pd-main-image">{{IMAGE}}</div>
+      {{THUMBNAILS}}
+    </div>
+
+    <div class="pd-info">
+      <p class="pd-category">{{CATEGORY}}</p>
       <h1>{{NAME}}</h1>
-      <div class="detail-price">৳{{PRICE}}</div>
-      <p class="stock">{{STOCK_TEXT}}</p>
-      <p class="description">{{DESCRIPTION}}</p>
-      <form class="add-form" method="POST" action="/cart/add">
+      <p class="pd-price">{{PRICE_HTML}}</p>
+      <p class="pd-stock {{STOCK_CLASS}}" id="stock-text">{{STOCK_TEXT}}</p>
+      {{DESCRIPTION}}
+
+      <form class="pd-form" method="POST" action="/cart/add">
         <input type="hidden" name="product_id" value="{{PRODUCT_ID}}">
         {{VARIANT}}
-        <label>Quantity
-          <input type="number" name="quantity" min="1" max="{{STOCK}}" value="1" required>
-        </label>
-        <button class="btn full" type="submit" {{DISABLED}}>Add to cart</button>
+        <div class="pd-buy">
+          <div class="qty" role="group" aria-label="Quantity">
+            <button type="button" data-step="-1" aria-label="Decrease quantity">−</button>
+            <input type="number" name="quantity" min="1" max="{{STOCK}}" value="1" required aria-label="Quantity" inputmode="numeric">
+            <button type="button" data-step="1" aria-label="Increase quantity">+</button>
+          </div>
+          <button class="btn btn-dark pd-add" type="submit" {{DISABLED}}>{{ADD_LABEL}}</button>
+        </div>
       </form>
+
+      <ul class="pd-assure">
+        <li>{{CHECK}}Delivery {{INSIDE_DHAKA}} inside Dhaka, {{OUTSIDE_DHAKA}} outside Dhaka</li>
+        <li>{{CHECK}}Cash on delivery, bKash or Nagad</li>
+      </ul>
+
+      <div class="pd-details">
+        {{PRODUCT_DETAILS}}
+        <details>
+          <summary>Delivery and returns</summary>
+          <div class="pd-detail-body">
+            <p>Delivery costs {{INSIDE_DHAKA}} inside Dhaka and {{OUTSIDE_DHAKA}} to the rest of Bangladesh. You choose your area at checkout and the charge is added to your total.</p>
+            <p>{{RETURNS_POLICY}}</p>
+          </div>
+        </details>
+      </div>
     </div>
   </div>
+  {{RELATED_PRODUCTS}}
 </main>
 
-<footer><div class="container">© Spark Corner</div></footer>
+{{FOOTER}}
 
+<script type="application/ld+json">{{JSON_LD}}</script>
 <script>
-  document.querySelectorAll(".product-thumbnail").forEach((thumbnail) => {
-    thumbnail.addEventListener("click", () => {
-      const mainImage = document.querySelector(".detail-image img");
-
-      if (mainImage) {
-        mainImage.src = thumbnail.src;
-      }
+  const mainImage = document.querySelector(".pd-main-image img");
+  const showImage = (src) => { if (src && mainImage) mainImage.src = src; };
+  document.querySelectorAll(".pd-thumb").forEach((thumb) => {
+    thumb.addEventListener("click", () => {
+      showImage(thumb.dataset.image);
+      document.querySelectorAll(".pd-thumb").forEach((other) => other.setAttribute("aria-pressed", String(other === thumb)));
     });
   });
+
+  const quantity = document.querySelector(".pd-form input[name='quantity']");
+  const addButton = document.querySelector(".pd-add");
+  const addLabel = addButton?.textContent;
+  document.querySelectorAll(".qty button").forEach((button) => {
+    button.addEventListener("click", () => {
+      const max = Number(quantity.max) || 1;
+      quantity.value = Math.min(max, Math.max(1, Number(quantity.value || 1) + Number(button.dataset.step)));
+    });
+  });
+
+  const variants = document.querySelectorAll("input[name='variant_id']");
+  const variantLabel = document.querySelector("#variant-choice");
+  const syncVariant = () => {
+    const selected = document.querySelector("input[name='variant_id']:checked");
+    if (!selected) return;
+    showImage(selected.dataset.image);
+    if (variantLabel) variantLabel.textContent = selected.dataset.label;
+    const stock = Number(selected.dataset.stock || 0);
+    quantity.max = Math.max(stock, 1);
+    if (Number(quantity.value) > stock) quantity.value = Math.max(stock, 1);
+    addButton.disabled = stock < 1;
+    addButton.textContent = stock < 1 ? "This option is sold out" : addLabel;
+  };
+  variants.forEach((input) => input.addEventListener("change", syncVariant));
+  syncVariant();
 </script>
