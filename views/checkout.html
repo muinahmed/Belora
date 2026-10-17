@@ -3,40 +3,41 @@
 <main id="main-content" class="wrap checkout-page">
   {{BREADCRUMBS}}
   <h1>Checkout</h1>
+  {{ERROR}}
   <div class="checkout-grid">
     <form class="checkout-form" method="POST" action="/checkout">
       <fieldset>
         <legend>Your details</legend>
-        <label>Full name<input name="customer_name" autocomplete="name" required></label>
+        <label>Full name<input name="customer_name" autocomplete="name" maxlength="100" value="{{NAME}}" required></label>
         <div class="field-pair">
-          <label>Phone<input name="phone" type="tel" inputmode="tel" autocomplete="tel" required></label>
-          <label>Confirm phone<input name="phone_confirmation" type="tel" inputmode="tel" autocomplete="tel" required></label>
+          <label>Phone<input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="01XXXXXXXXX" value="{{PHONE}}" required></label>
+          <label>Confirm phone<input name="phone_confirmation" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="01XXXXXXXXX" value="{{PHONE_CONFIRMATION}}" required></label>
         </div>
-        <label>Email <span class="optional">(optional)</span><input type="email" name="email" autocomplete="email"></label>
+        <label>Email <span class="optional">(optional)</span><input type="email" name="email" autocomplete="email" maxlength="120" value="{{EMAIL}}"></label>
       </fieldset>
 
       <fieldset>
         <legend>Delivery</legend>
-        <label>Delivery address<textarea name="address" autocomplete="street-address" rows="3" required></textarea></label>
+        <label>Delivery address<textarea name="address" autocomplete="street-address" rows="3" maxlength="300" required>{{ADDRESS}}</textarea></label>
         <label>District or city
           <select name="district" required>
-            <option value="" disabled selected>Select your district or city</option>
+            <option value="" disabled {{DISTRICT_PLACEHOLDER_SELECTED}}>Select your district or city</option>
             {{DISTRICT_OPTIONS}}
           </select>
         </label>
         <div class="choice-group" role="radiogroup" aria-label="Delivery area">
-          <label class="choice"><input type="radio" name="delivery_area" value="Inside Dhaka" data-charge="{{INSIDE_CHARGE}}" checked><span><b>Inside Dhaka</b><small>৳{{INSIDE_CHARGE}}</small></span></label>
-          <label class="choice"><input type="radio" name="delivery_area" value="Outside Dhaka" data-charge="{{OUTSIDE_CHARGE}}"><span><b>Outside Dhaka</b><small>৳{{OUTSIDE_CHARGE}}</small></span></label>
+          <label class="choice"><input type="radio" name="delivery_area" value="Inside Dhaka" data-charge="{{INSIDE_CHARGE}}" {{INSIDE_CHECKED}}><span><b>Inside Dhaka</b><small>৳{{INSIDE_CHARGE}}</small></span></label>
+          <label class="choice"><input type="radio" name="delivery_area" value="Outside Dhaka" data-charge="{{OUTSIDE_CHARGE}}" {{OUTSIDE_CHECKED}}><span><b>Outside Dhaka</b><small>৳{{OUTSIDE_CHARGE}}</small></span></label>
         </div>
-        <label>Order note <span class="optional">(optional)</span><textarea name="order_notes" rows="2" placeholder="Shade preference, delivery instructions or a gift note"></textarea></label>
+        <label>Order note <span class="optional">(optional)</span><textarea name="order_notes" rows="2" maxlength="500" placeholder="Shade preference, delivery instructions or a gift note">{{NOTES}}</textarea></label>
       </fieldset>
 
       <fieldset>
         <legend>Payment</legend>
         <div class="choice-group choice-stack" role="radiogroup" aria-label="Payment method">
-          <label class="choice"><input type="radio" name="payment_method" value="Cash on Delivery" checked><span><b>Cash on delivery</b><small>Pay when your order arrives</small></span></label>
-          <label class="choice"><input type="radio" name="payment_method" value="bKash"><span><b>bKash</b><small>Mobile payment</small></span></label>
-          <label class="choice"><input type="radio" name="payment_method" value="Nagad"><span><b>Nagad</b><small>Mobile payment</small></span></label>
+          <label class="choice"><input type="radio" name="payment_method" value="Cash on Delivery" {{COD_CHECKED}}><span><b>Cash on delivery</b><small>Pay when your order arrives</small></span></label>
+          <label class="choice"><input type="radio" name="payment_method" value="bKash" {{BKASH_CHECKED}}><span><b>bKash</b><small>Mobile payment</small></span></label>
+          <label class="choice"><input type="radio" name="payment_method" value="Nagad" {{NAGAD_CHECKED}}><span><b>Nagad</b><small>Mobile payment</small></span></label>
         </div>
       </fieldset>
 

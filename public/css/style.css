@@ -796,3 +796,24 @@ td a:not(.btn):hover { text-decoration: underline; }
   .chips::-webkit-scrollbar { display: none; }
   .chips a { flex: none; white-space: nowrap; scroll-snap-align: start; }
 }
+
+/* ---------- Product shades ----------
+   Caption names the shade in the main photo; thumbnails that belong to a shade carry
+   its name; shade buttons show a 56px photo, or say there is no photo yet. */
+.pd-caption { margin: 0; font-size: .92rem; color: var(--ink-soft); }
+.pd-caption::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--rust); vertical-align: middle; }
+.pd-thumb { position: relative; overflow: hidden; }
+.pd-thumb-badge {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 4px;
+  background: rgba(251, 247, 241, .9); color: var(--charcoal);
+  font-size: .68rem; line-height: 1.2; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pd-thumb[aria-pressed="true"] .pd-thumb-badge { background: var(--olive); color: var(--ivory); }
+.swatch.has-image > span { padding: 5px 14px 5px 5px; gap: 10px; }
+.swatch img, .swatch-nophoto { width: 56px; height: 56px; flex: none; }
+.swatch img { object-fit: cover; }
+.swatch-nophoto {
+  display: grid; place-items: center; padding: 4px; text-align: center;
+  background: var(--cream); color: var(--ink-soft); font-size: .62rem; line-height: 1.15;
+}
+.swatch-name { display: grid; gap: 1px; }

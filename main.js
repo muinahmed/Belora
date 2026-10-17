@@ -127,7 +127,7 @@ function adminGuard(request) {
 }
 
 function cartCount(request) {
-  return getCart(request).reduce((sum, item) => sum + item.quantity, 0);
+  return getCartDetails(request).reduce((sum, item) => sum + item.quantity, 0);
 }
 
 function storeHeader(request, active = "", query = "") {
@@ -161,6 +161,17 @@ function adminHeader(title) {
 
 function adminPage(title, content) {
   return page(title, `${adminHeader(title)}<main id="main-content" class="admin-main">${content}</main>`, { noindex: true });
+}
+
+// Shown when the admin product form can't be saved. Going back keeps what was typed
+// (browsers restore form fields), so the admin only fixes the named problem.
+function productFormError(message) {
+  return html(adminPage("Product not saved", `
+    <div class="page-title"><p class="eyebrow">Catalogue</p><h1>Product not saved</h1></div>
+    <p class="error-box" role="alert">${escapeHtml(message)}</p>
+    <p class="muted">Nothing was changed. Go back to the form, fix this and save again. Photos you chose will need to be selected again.</p>
+    <p><button class="btn" type="button" onclick="history.back()">Back to the form</button>
+    <a class="btn btn-light" href="/admin/products">All products</a></p>`), 400);
 }
 
 // Sale price and featured flag from the admin product form.
@@ -242,10 +253,13 @@ function getProduct(id) {
   };
 }
 
+// Resolves the stored cart against the database. Items whose product was deleted or
+// deactivated, or whose variant no longer exists, are dropped from the stored cart too.
 function getCartDetails(request) {
-  return getCart(request).map(item => {
+  const cart = getCart(request);
+  const details = cart.map(item => {
     const product = getProduct(item.productId);
-    if (!product) return null;
+    if (!product || !product.active) return null;
     const variant = item.variantId
       ? product.variants.find(entry => entry.id === item.variantId)
       : null;
@@ -258,7 +272,13 @@ function getCartDetails(request) {
       availableStock: variant?.stock ?? product.stock,
       lineTotal: product.unitPrice * item.quantity
     };
-  }).filter(Boolean);
+  });
+  const valid = details.filter(Boolean);
+  const id = cartIdFor(request);
+  if (id && valid.length !== cart.length) {
+    carts.set(id, cart.filter((_, index) => details[index]));
+  }
+  return valid;
 }
 
 function totalForCart(details) {
@@ -296,16 +316,18 @@ function notFound(request) {
     </main>${storeFooter()}`, { noindex: true }), 404);
 }
 
+// Returns a message for an unacceptable upload, or null when it is fine or absent.
+function imageProblem(file) {
+  if (!(file instanceof File) || file.size === 0) return null;
+  if (!file.type.startsWith("image/")) return `"${file.name}" is not an image. Please upload JPG, PNG, WebP or GIF photos.`;
+  if (file.size > 5 * 1024 * 1024) return `"${file.name}" is larger than 5 MB. Please upload a smaller photo.`;
+  return null;
+}
+
 async function saveUploadedImage(file) {
   if (!(file instanceof File) || file.size === 0) return null;
-
-  if (!file.type.startsWith("image/")) {
-    throw new Error("Please upload an image file.");
-  }
-
-  if (file.size > 5 * 1024 * 1024) {
-    throw new Error("Image must be 5 MB or smaller.");
-  }
+  const problem = imageProblem(file);
+  if (problem) throw new Error(problem);
 
   const originalExtension = file.name.includes(".")
     ? file.name.split(".").pop().toLowerCase()
@@ -352,26 +374,132 @@ function designImagePreview(variants = []) {
   `).join("")}</div>`;
 }
 
-async function saveDesignVariants(productId, variantName, variantValue, variantStock, files = [], existing = []) {
-  const names = String(variantValue ?? "").split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+// Syncs a product's variants with the form. Existing variants are matched by value and
+// updated in place so their ids stay stable for carts and orders; new values are inserted
+// and values no longer in the form are deleted.
+// Checks the variant fields and works out what to update, insert and delete, without
+// writing anything. Returns { error } when a line is invalid.
+function planVariants(variantName, variantValue, variantStock, files = [], existing = []) {
+  const names = variantName
+    ? String(variantValue ?? "").split(/\r?\n/).map(value => value.trim()).filter(Boolean)
+    : [];
   const stocks = String(variantStock ?? "").split(/\r?\n/).map(value => value.trim());
-  if (!variantName || !names.length) return;
 
+  const unmatched = [...existing];
+  const planned = [];
   for (const [index, value] of names.entries()) {
-    const uploaded = await saveUploadedImage(files[index]);
-    const old = existing.find(variant => variant.value === value);
+    const matchIndex = unmatched.findIndex(variant => variant.value === value);
+    const old = matchIndex >= 0 ? unmatched.splice(matchIndex, 1)[0] : null;
     const requestedStock = stocks[index] === "" || stocks[index] === undefined ? old?.stock ?? null : Number(stocks[index]);
     if (requestedStock !== null && (!Number.isInteger(requestedStock) || requestedStock < 0)) {
-      throw new Error(`Stock for ${value} must be a whole number of 0 or more.`);
+      return { error: `Stock for "${value}" must be a whole number of 0 or more (line ${index + 1} of the stock list).` };
     }
-    db.query(
-      "INSERT INTO product_variants (product_id, variant_name, variant_value, image_path, stock) VALUES (?, ?, ?, ?, ?)",
-      [productId, variantName, value, uploaded?.webPath || old?.imagePath || null, requestedStock]
-    );
+    const problem = imageProblem(files[index]);
+    if (problem) return { error: `Photo for "${value}": ${problem}` };
+    planned.push({ value, old, stock: requestedStock, file: files[index] });
+  }
+  return { variantName, planned, unmatched };
+}
+
+async function saveDesignVariants(productId, { variantName, planned, unmatched }) {
+  for (const entry of planned) {
+    const uploaded = await saveUploadedImage(entry.file);
+    const imagePath = uploaded?.webPath || entry.old?.imagePath || null;
+    if (entry.old) {
+      db.query(
+        "UPDATE product_variants SET variant_name = ?, image_path = ?, stock = ? WHERE id = ? AND product_id = ?",
+        [variantName, imagePath, entry.stock, entry.old.id, productId]
+      );
+    } else {
+      db.query(
+        "INSERT INTO product_variants (product_id, variant_name, variant_value, image_path, stock) VALUES (?, ?, ?, ?, ?)",
+        [productId, variantName, entry.value, imagePath, entry.stock]
+      );
+    }
+  }
+  for (const removed of unmatched) {
+    db.query("DELETE FROM product_variants WHERE id = ? AND product_id = ?", [removed.id, productId]);
   }
 }
 
-Deno.serve({ port: PORT }, async (request) => {
+// Accepts 01XXXXXXXXX, 8801XXXXXXXXX or +8801XXXXXXXXX (spaces and dashes allowed)
+// and returns the 11-digit local form, or null when it isn't a Bangladeshi mobile number.
+function normalizeBdPhone(value = "") {
+  const match = String(value).replace(/[\s-]/g, "").match(/^(?:\+?88)?(01[3-9]\d{8})$/);
+  return match ? match[1] : null;
+}
+
+// Railway's proxy appends the visitor's address as the last X-Forwarded-For entry;
+// earlier entries can be set by the client, so only the last one is trusted.
+function clientAddress(request, info) {
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",").pop().trim();
+  return info?.remoteAddr?.hostname ?? "unknown";
+}
+
+// At most CHECKOUT_LIMIT placed orders per connection per hour. Many customers share
+// a mobile-network address, so the limit stays generous and counts only real orders.
+const CHECKOUT_LIMIT = 10;
+const CHECKOUT_WINDOW_MS = 60 * 60 * 1000;
+const checkoutLog = new Map();
+
+function recentCheckouts(ip) {
+  const cutoff = Date.now() - CHECKOUT_WINDOW_MS;
+  const recent = (checkoutLog.get(ip) ?? []).filter(time => time > cutoff);
+  if (recent.length) checkoutLog.set(ip, recent);
+  else checkoutLog.delete(ip);
+  return recent;
+}
+
+function checkoutAllowed(ip) {
+  return recentCheckouts(ip).length < CHECKOUT_LIMIT;
+}
+
+function recordCheckout(ip) {
+  checkoutLog.set(ip, [...recentCheckouts(ip), Date.now()]);
+}
+
+async function renderCheckout(request, details, { error = "", values = {}, status = 200 } = {}) {
+  const items = details.map(item => `
+    <li>
+      <span class="summary-thumb">${item.imagePath ? `<img src="${escapeHtml(item.imagePath)}" alt="">` : `<span class="media-placeholder" aria-hidden="true">B</span>`}<b>${item.quantity}</b></span>
+      <span class="summary-name">${escapeHtml(item.product.name)}${item.variant ? `<small>${escapeHtml(item.variant.name)}: ${escapeHtml(item.variant.value)}</small>` : ""}</span>
+      <strong>${taka(item.lineTotal)}</strong>
+    </li>
+  `).join("");
+  const subtotal = totalForCart(details);
+  const area = values.deliveryArea === "Outside Dhaka" ? "Outside Dhaka" : "Inside Dhaka";
+  const payment = ["bKash", "Nagad"].includes(values.payment) ? values.payment : "Cash on Delivery";
+  const checked = (on) => on ? "checked" : "";
+
+  const view = await readView("checkout.html");
+  return html(page("Checkout", fill(view, {
+    HEADER: storeHeader(request, "bag"),
+    FOOTER: storeFooter(),
+    BREADCRUMBS: breadcrumbs([["Home", "/"], ["Bag", "/cart"], ["Checkout", ""]]),
+    ERROR: error ? `<p class="error-box" role="alert">${escapeHtml(error)}</p>` : "",
+    NAME: escapeHtml(values.name ?? ""),
+    PHONE: escapeHtml(values.phone ?? ""),
+    PHONE_CONFIRMATION: escapeHtml(values.phoneConfirmation ?? ""),
+    EMAIL: escapeHtml(values.email ?? ""),
+    ADDRESS: escapeHtml(values.address ?? ""),
+    NOTES: escapeHtml(values.notes ?? ""),
+    DISTRICT_PLACEHOLDER_SELECTED: DISTRICTS.includes(values.district) ? "" : "selected",
+    INSIDE_CHECKED: checked(area === "Inside Dhaka"),
+    OUTSIDE_CHECKED: checked(area === "Outside Dhaka"),
+    COD_CHECKED: checked(payment === "Cash on Delivery"),
+    BKASH_CHECKED: checked(payment === "bKash"),
+    NAGAD_CHECKED: checked(payment === "Nagad"),
+    ITEMS: items,
+    SUBTOTAL: String(subtotal),
+    SUBTOTAL_DISPLAY: taka(subtotal),
+    INSIDE_CHARGE: DELIVERY_CHARGES["Inside Dhaka"],
+    OUTSIDE_CHARGE: DELIVERY_CHARGES["Outside Dhaka"],
+    DISTRICT_OPTIONS: DISTRICTS.map(district => `<option value="${escapeHtml(district)}" ${district === values.district ? "selected" : ""}>${escapeHtml(district)}</option>`).join("")
+  }), { noindex: true }), status);
+}
+
+Deno.serve({ port: PORT }, async (request, info) => {
   const url = new URL(request.url);
 
   try {
@@ -661,21 +789,32 @@ Deno.serve({ port: PORT }, async (request) => {
       const image = mainImage
         ? `<img src="${escapeHtml(mainImage)}" alt="${escapeHtml(product.name)}">`
         : `<span class="media-placeholder large" aria-hidden="true">B</span>`;
+      // A gallery photo that is also a shade's photo is labelled with that shade, so the
+      // thumbnails, the caption and the shade buttons can stay in step.
+      const variantLabelFor = (path) => product.variants.find(variant => variant.imagePath === path)?.value ?? "";
       const thumbnails = gallery.length > 1
-        ? `<div class="pd-thumbs">${gallery.map((path, index) => `<button type="button" class="pd-thumb" data-image="${escapeHtml(path)}" aria-pressed="${index === 0}" aria-label="Show image ${index + 1} of ${gallery.length}"><img src="${escapeHtml(path)}" alt="" loading="lazy"></button>`).join("")}</div>`
+        ? `<div class="pd-thumbs">${gallery.map((path, index) => {
+            const label = variantLabelFor(path);
+            return `<button type="button" class="pd-thumb" data-image="${escapeHtml(path)}" data-label="${escapeHtml(label)}" aria-pressed="${index === 0}" aria-label="${label ? `Show ${escapeHtml(label)}` : `Show image ${index + 1} of ${gallery.length}`}"><img src="${escapeHtml(path)}" alt="" loading="lazy">${label ? `<span class="pd-thumb-badge">${escapeHtml(label)}</span>` : ""}</button>`;
+          }).join("")}</div>`
         : "";
 
       const variantStock = (variant) => variant.stock ?? product.stock;
       const firstAvailable = product.variants.find(variant => variantStock(variant) > 0);
+      const anyVariantPhoto = product.variants.some(variant => variant.imagePath);
       const variantSelector = product.variants.length
         ? `<fieldset class="pd-variants">
             <legend>${escapeHtml(product.variants[0].name)}: <span id="variant-choice">${escapeHtml(firstAvailable?.value ?? "Sold out")}</span></legend>
             <div class="swatches">
               ${product.variants.map(variant => {
                 const stock = variantStock(variant);
-                return `<label class="swatch${variant.imagePath ? " has-image" : ""}${stock < 1 ? " is-soldout" : ""}">
+                // When other shades have photos, a shade without one says so instead of looking broken.
+                const media = variant.imagePath
+                  ? `<img src="${escapeHtml(variant.imagePath)}" alt="" loading="lazy">`
+                  : anyVariantPhoto ? `<span class="swatch-nophoto">No photo yet</span>` : "";
+                return `<label class="swatch${anyVariantPhoto ? " has-image" : ""}${stock < 1 ? " is-soldout" : ""}">
                   <input type="radio" name="variant_id" value="${variant.id}" data-image="${escapeHtml(variant.imagePath)}" data-stock="${stock}" data-label="${escapeHtml(variant.value)}" ${variant === firstAvailable ? "checked" : ""} ${stock < 1 ? "disabled" : ""} required>
-                  <span>${variant.imagePath ? `<img src="${escapeHtml(variant.imagePath)}" alt="" loading="lazy">` : ""}${escapeHtml(variant.value)}${stock < 1 ? `<small>Sold out</small>` : ""}</span>
+                  <span>${media}<span class="swatch-name">${escapeHtml(variant.value)}${stock < 1 ? `<small>Sold out</small>` : ""}</span></span>
                 </label>`;
               }).join("")}
             </div>
@@ -734,6 +873,7 @@ Deno.serve({ port: PORT }, async (request) => {
         BREADCRUMBS: breadcrumbs(crumbs),
         IMAGE: image,
         THUMBNAILS: thumbnails,
+        VARIANT_TYPE: escapeHtml(product.variants[0]?.name ?? ""),
         CATEGORY: escapeHtml(product.categoryName),
         NAME: escapeHtml(product.name),
         PRICE_HTML: priceHtml,
@@ -825,7 +965,12 @@ Deno.serve({ port: PORT }, async (request) => {
       const subtotal = totalForCart(details);
       const content = details.length
         ? `<div class="bag-layout">
-            <section class="bag-lines" aria-label="Items in your bag">${lines}</section>
+            <section class="bag-lines" aria-label="Items in your bag">
+              ${lines}
+              <form method="POST" action="/cart/clear" onsubmit="return confirm('Remove everything from your bag?')">
+                <button class="link-remove" type="submit">Clear bag</button>
+              </form>
+            </section>
             <aside class="summary" aria-labelledby="summary-title">
               <h2 id="summary-title">Order summary</h2>
               <dl class="summary-lines">
@@ -891,33 +1036,18 @@ Deno.serve({ port: PORT }, async (request) => {
       return redirect("/cart");
     }
 
+    if (url.pathname === "/cart/clear" && request.method === "POST") {
+      const id = cartIdFor(request);
+      if (id) carts.set(id, []);
+      return redirect("/cart");
+    }
+
     // ---------- Checkout ----------
     if (url.pathname === "/checkout" && request.method === "GET") {
       const details = getCartDetails(request);
       if (!details.length) return redirect("/cart");
       trackEvent("checkout_started");
-
-      const items = details.map(item => `
-        <li>
-          <span class="summary-thumb">${item.imagePath ? `<img src="${escapeHtml(item.imagePath)}" alt="">` : `<span class="media-placeholder" aria-hidden="true">B</span>`}<b>${item.quantity}</b></span>
-          <span class="summary-name">${escapeHtml(item.product.name)}${item.variant ? `<small>${escapeHtml(item.variant.name)}: ${escapeHtml(item.variant.value)}</small>` : ""}</span>
-          <strong>${taka(item.lineTotal)}</strong>
-        </li>
-      `).join("");
-      const subtotal = totalForCart(details);
-
-      const view = await readView("checkout.html");
-      return html(page("Checkout", fill(view, {
-        HEADER: storeHeader(request, "bag"),
-        FOOTER: storeFooter(),
-        BREADCRUMBS: breadcrumbs([["Home", "/"], ["Bag", "/cart"], ["Checkout", ""]]),
-        ITEMS: items,
-        SUBTOTAL: String(subtotal),
-        SUBTOTAL_DISPLAY: taka(subtotal),
-        INSIDE_CHARGE: DELIVERY_CHARGES["Inside Dhaka"],
-        OUTSIDE_CHARGE: DELIVERY_CHARGES["Outside Dhaka"],
-        DISTRICT_OPTIONS: DISTRICTS.map(district => `<option value="${escapeHtml(district)}">${escapeHtml(district)}</option>`).join("")
-      }), { noindex: true }));
+      return await renderCheckout(request, details);
     }
 
     if (url.pathname === "/checkout" && request.method === "POST") {
@@ -925,22 +1055,44 @@ Deno.serve({ port: PORT }, async (request) => {
       if (!details.length) return redirect("/cart");
 
       const form = await request.formData();
-      const name = form.get("customer_name")?.toString().trim();
-      const phone = form.get("phone")?.toString().trim();
-      const phoneConfirmation = form.get("phone_confirmation")?.toString().trim();
-      const email = form.get("email")?.toString().trim() || null;
-      const address = form.get("address")?.toString().trim();
-      const payment = form.get("payment_method")?.toString();
-      const deliveryArea = form.get("delivery_area")?.toString();
-      const district = form.get("district")?.toString();
-      const orderNotes = form.get("order_notes")?.toString().trim() || null;
+      const field = (key) => form.get(key)?.toString().trim() ?? "";
+      const values = {
+        name: field("customer_name"),
+        phone: field("phone"),
+        phoneConfirmation: field("phone_confirmation"),
+        email: field("email"),
+        address: field("address"),
+        payment: field("payment_method"),
+        deliveryArea: field("delivery_area"),
+        district: field("district"),
+        notes: field("order_notes")
+      };
+      const retry = (error, status = 400) => renderCheckout(request, details, { error, values, status });
 
-      if (!name || !phone || !address || !DISTRICTS.includes(district) || !["Cash on Delivery", "bKash", "Nagad"].includes(payment) || !["Inside Dhaka", "Outside Dhaka"].includes(deliveryArea)) {
-        return new Response("Please complete all required checkout fields.", { status: 400 });
+      const clientIp = clientAddress(request, info);
+      if (!checkoutAllowed(clientIp)) {
+        return retry(`Too many orders from this connection in the last hour. Please wait a little${SHOP_WHATSAPP_NUMBER ? " or message us on WhatsApp" : ""} and we will help you finish your order.`, 429);
       }
-      if (phone !== phoneConfirmation) {
-        return new Response("Phone numbers do not match.", { status: 400 });
+
+      if (!values.name || !values.phone || !values.address || !DISTRICTS.includes(values.district) || !["Cash on Delivery", "bKash", "Nagad"].includes(values.payment) || !DELIVERY_CHARGES[values.deliveryArea]) {
+        return retry("Please fill in your name, phone, delivery address and district.");
       }
+      for (const [label, value, max] of [["Full name", values.name, 100], ["Delivery address", values.address, 300], ["Order note", values.notes, 500], ["Email", values.email, 120]]) {
+        if (value.length > max) return retry(`${label} is too long. Please keep it to ${max} characters or fewer.`);
+      }
+      const phone = normalizeBdPhone(values.phone);
+      if (!phone) {
+        return retry("Please enter a valid Bangladeshi mobile number, for example 01712345678.");
+      }
+      if (normalizeBdPhone(values.phoneConfirmation) !== phone) {
+        return retry("The two phone numbers do not match. Please check them.");
+      }
+      if (values.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email)) {
+        return retry("Please enter a valid email address, or leave it empty.");
+      }
+      const { name, address, payment, deliveryArea, district } = values;
+      const email = values.email || null;
+      const orderNotes = values.notes || null;
 
       for (const item of details) {
         const current = getProduct(item.product.id);
@@ -949,7 +1101,7 @@ Deno.serve({ port: PORT }, async (request) => {
           : null;
         const availableStock = currentVariant?.stock ?? current?.stock ?? 0;
         if (!current || !current.active || current.stock < item.quantity || availableStock < item.quantity) {
-          return new Response(`Not enough stock for ${escapeHtml(item.product.name)}.`, { status: 400 });
+          return retry(`Sorry, there isn't enough stock left for ${item.product.name}. Please update your bag.`);
         }
       }
 
@@ -975,11 +1127,12 @@ Deno.serve({ port: PORT }, async (request) => {
 
         db.query(`
           INSERT INTO order_items
-          (order_id, product_id, product_name, price, quantity)
-          VALUES (?, ?, ?, ?, ?)
+          (order_id, product_id, variant_id, product_name, price, quantity)
+          VALUES (?, ?, ?, ?, ?, ?)
         `, [
           orderId,
           item.product.id,
+          item.variantId,
           displayName,
           item.product.unitPrice,
           item.quantity
@@ -1005,6 +1158,7 @@ Deno.serve({ port: PORT }, async (request) => {
       const id = cartIdFor(request);
       if (id) carts.set(id, []);
       trackEvent("order_complete");
+      recordCheckout(clientIp);
 
       return redirect(`/order-success/${orderId}`);
     }
@@ -1074,7 +1228,7 @@ Deno.serve({ port: PORT }, async (request) => {
       const token = cookie(request, "spark_admin");
       if (token) sessions.delete(token);
 
-      const response = redirect("/admin/login");
+      const response = redirect("/");
       response.headers.append(
         "Set-Cookie",
         "spark_admin=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax"
@@ -1115,6 +1269,9 @@ Deno.serve({ port: PORT }, async (request) => {
             <div><dt>Checkouts started</dt><dd>${eventCount("checkout_started")}</dd></div>
             <div><dt>Orders placed</dt><dd>${eventCount("order_complete")}</dd></div>
           </dl>
+          <form method="POST" action="/admin/analytics/reset" onsubmit="return confirm('Reset all analytics? Views, bag adds, checkouts and order counts will start from zero.')">
+            <button class="danger-button" type="submit">Reset analytics</button>
+          </form>
         </section>
         <div class="admin-grid">
           <a class="action-card" href="/admin/products/add"><h2>Add product</h2><p>Upload a photo, price, stock and variants.</p></a>
@@ -1266,11 +1423,15 @@ return new Response(
       const variantImages = form.getAll("variant_images");
       const images = form.getAll("images");
 
-      if (!name || !Number.isFinite(price) || price < 0 || !Number.isInteger(stock) || stock < 0) {
-        return new Response("Please enter valid product information.", { status: 400 });
-      }
+      if (!name) return productFormError("Please enter a product name.");
+      if (!Number.isFinite(price) || price < 0) return productFormError("Price must be a number of 0 or more.");
+      if (!Number.isInteger(stock) || stock < 0) return productFormError("Stock must be a whole number of 0 or more.");
       const sale = saleFields(form, price);
-      if (sale.error) return new Response(sale.error, { status: 400 });
+      if (sale.error) return productFormError(sale.error);
+      const variantPlan = planVariants(variantName, variantValue, variantStock, variantImages);
+      if (variantPlan.error) return productFormError(variantPlan.error);
+      const imageError = images.map(imageProblem).find(Boolean);
+      if (imageError) return productFormError(imageError);
 
       const slugBase = slugify(name);
       let slug = slugBase || `product-${Date.now()}`;
@@ -1287,7 +1448,7 @@ return new Response(
 
       const productId = db.query("SELECT last_insert_rowid()")[0][0];
 
-      await saveDesignVariants(productId, variantName, variantValue, variantStock, variantImages);
+      await saveDesignVariants(productId, variantPlan);
 
       for (const [index, image] of images.entries()) {
   const uploaded = await saveUploadedImage(image);
@@ -1377,11 +1538,15 @@ return new Response(
       const variantImages = form.getAll("variant_images");
       const images = form.getAll("images");
 
-      if (!name || !Number.isFinite(price) || price < 0 || !Number.isInteger(stock) || stock < 0) {
-        return new Response("Please enter valid product information.", { status: 400 });
-      }
+      if (!name) return productFormError("Please enter a product name.");
+      if (!Number.isFinite(price) || price < 0) return productFormError("Price must be a number of 0 or more.");
+      if (!Number.isInteger(stock) || stock < 0) return productFormError("Stock must be a whole number of 0 or more.");
       const sale = saleFields(form, price);
-      if (sale.error) return new Response(sale.error, { status: 400 });
+      if (sale.error) return productFormError(sale.error);
+      const variantPlan = planVariants(variantName, variantValue, variantStock, variantImages, product.variants);
+      if (variantPlan.error) return productFormError(variantPlan.error);
+      const imageError = images.map(imageProblem).find(Boolean);
+      if (imageError) return productFormError(imageError);
 
       let slug = slugify(name) || `product-${id}`;
       const duplicate = db.query("SELECT id FROM products WHERE slug = ? AND id <> ?", [slug, id]);
@@ -1395,8 +1560,7 @@ return new Response(
         WHERE id = ?
       `, [categoryId, name, slug, description, price, sale.salePrice, sale.featured, sku, stock, skinConcern, ingredients, howToUse, material, sizeInfo, careInstructions, id]);
 
-      db.query("DELETE FROM product_variants WHERE product_id = ?", [id]);
-      await saveDesignVariants(id, variantName, variantValue, variantStock, variantImages, product.variants);
+      await saveDesignVariants(id, variantPlan);
 
       for (const [index, image] of images.entries()) {
   const uploaded = await saveUploadedImage(image);
@@ -1603,8 +1767,77 @@ return redirect("/admin/products");
         return new Response("Invalid status", { status: 400 });
       }
 
-      db.query("UPDATE orders SET status = ? WHERE id = ?", [status, orderId]);
+      // Cancelling returns the order's stock; un-cancelling takes it again. The status
+      // read and the stock change share one transaction so a double submit can't apply twice.
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const current = db.query("SELECT status FROM orders WHERE id = ?", [orderId]);
+        if (!current.length) {
+          db.exec("ROLLBACK");
+          return new Response("Order not found", { status: 404 });
+        }
+        const previous = current[0][0];
+        const items = db.query("SELECT product_id, variant_id, quantity FROM order_items WHERE order_id = ?", [orderId]);
+
+        if (previous !== "Cancelled" && status === "Cancelled") {
+          for (const [productId, variantId, quantity] of items) {
+            if (productId) db.query("UPDATE products SET stock = stock + ? WHERE id = ?", [quantity, productId]);
+            if (variantId) db.query("UPDATE product_variants SET stock = stock + ? WHERE id = ? AND stock IS NOT NULL", [quantity, variantId]);
+          }
+        } else if (previous === "Cancelled" && status !== "Cancelled") {
+          const needByProduct = new Map();
+          const needByVariant = new Map();
+          for (const [productId, variantId, quantity] of items) {
+            if (productId) needByProduct.set(productId, (needByProduct.get(productId) ?? 0) + Number(quantity));
+            if (variantId) needByVariant.set(variantId, (needByVariant.get(variantId) ?? 0) + Number(quantity));
+          }
+          for (const [productId, need] of needByProduct) {
+            const row = db.query("SELECT name, stock FROM products WHERE id = ?", [productId])[0];
+            if (row && Number(row[1]) < need) {
+              db.exec("ROLLBACK");
+              return new Response(`Not enough stock to reopen this order: ${row[0]} has ${row[1]}, the order needs ${need}.`, { status: 400 });
+            }
+          }
+          for (const [variantId, need] of needByVariant) {
+            const row = db.query("SELECT variant_value, stock FROM product_variants WHERE id = ?", [variantId])[0];
+            if (row && row[1] !== null && Number(row[1]) < need) {
+              db.exec("ROLLBACK");
+              return new Response(`Not enough stock to reopen this order: ${row[0]} has ${row[1]}, the order needs ${need}.`, { status: 400 });
+            }
+          }
+          for (const [productId, need] of needByProduct) db.query("UPDATE products SET stock = stock - ? WHERE id = ?", [need, productId]);
+          for (const [variantId, need] of needByVariant) db.query("UPDATE product_variants SET stock = stock - ? WHERE id = ? AND stock IS NOT NULL", [need, variantId]);
+        }
+
+        db.query("UPDATE orders SET status = ? WHERE id = ?", [status, orderId]);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
       return redirect(`/admin/orders/${orderId}`);
+    }
+
+    if (url.pathname.startsWith("/admin/orders/") && url.pathname.endsWith("/delete") && request.method === "POST") {
+      const denied = adminGuard(request);
+      if (denied) return denied;
+
+      const orderId = Number(url.pathname.split("/")[3]);
+      const order = db.query("SELECT status FROM orders WHERE id = ?", [orderId]);
+      if (!order.length) return new Response("Order not found", { status: 404 });
+      if (order[0][0] !== "Cancelled") {
+        return new Response("Only cancelled orders can be deleted. Cancel the order first.", { status: 400 });
+      }
+      // Stock was already returned when the order was cancelled; order_items cascade.
+      db.query("DELETE FROM orders WHERE id = ? AND status = 'Cancelled'", [orderId]);
+      return redirect("/admin/orders");
+    }
+
+    if (url.pathname === "/admin/analytics/reset" && request.method === "POST") {
+      const denied = adminGuard(request);
+      if (denied) return denied;
+      db.query("DELETE FROM analytics_events");
+      return redirect("/admin/dashboard");
     }
 
     if (url.pathname.startsWith("/admin/orders/") && url.pathname.endsWith("/print") && request.method === "GET") {
@@ -1683,6 +1916,9 @@ return redirect("/admin/products");
                <button class="btn" type="submit">Save status</button>
              </form>
              <p><a class="text-link" target="_blank" href="/admin/orders/${orderId}/print">Print packing slip</a></p>
+             ${row[6] === "Cancelled" ? `<form method="POST" action="/admin/orders/${orderId}/delete" onsubmit="return confirm('Delete order #${orderId} permanently? This cannot be undone.')">
+               <button class="danger-button" type="submit">Delete order</button>
+             </form>` : ""}
           </section>
         </div>
         <section class="panel">
@@ -1701,10 +1937,14 @@ return redirect("/admin/products");
     return new Response("404 - Page Not Found", { status: 404 });
   } catch (error) {
     console.error(error);
-    return new Response(
-      `500 - ${escapeHtml(error instanceof Error ? error.message : String(error))}`,
-      { status: 500 }
-    );
+    // Generic page with no database calls, so it still renders when the database is the
+    // problem. Error details go to the server log only.
+    return html(page("Something went wrong", `
+      <main id="main-content" class="wrap empty-state not-found">
+        <h1>Something went wrong. Please try again.</h1>
+        <p>If it keeps happening, please contact us and we will help.</p>
+        <div class="empty-links"><a class="btn btn-dark" href="/">Go to the homepage</a></div>
+      </main>`, { noindex: true }), 500);
   }
 });
 

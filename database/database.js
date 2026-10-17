@@ -128,6 +128,7 @@ addColumnIfMissing("orders", "district", "district TEXT");
 addColumnIfMissing("orders", "subtotal", "subtotal REAL NOT NULL DEFAULT 0");
 addColumnIfMissing("orders", "delivery_charge", "delivery_charge REAL NOT NULL DEFAULT 0");
 addColumnIfMissing("orders", "order_notes", "order_notes TEXT");
+addColumnIfMissing("order_items", "variant_id", "variant_id INTEGER");
 addColumnIfMissing("products", "skin_concern", "skin_concern TEXT");
 addColumnIfMissing("products", "ingredients", "ingredients TEXT");
 addColumnIfMissing("products", "how_to_use", "how_to_use TEXT");

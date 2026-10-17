@@ -3,8 +3,9 @@
 <main id="main-content" class="wrap product-page">
   {{BREADCRUMBS}}
   <div class="pd-grid">
-    <div class="pd-gallery">
+    <div class="pd-gallery" data-variant-type="{{VARIANT_TYPE}}">
       <div class="pd-main-image">{{IMAGE}}</div>
+      <p class="pd-caption" id="pd-caption" aria-live="polite" hidden></p>
       {{THUMBNAILS}}
     </div>
 
@@ -53,11 +54,36 @@
 <script type="application/ld+json">{{JSON_LD}}</script>
 <script>
   const mainImage = document.querySelector(".pd-main-image img");
-  const showImage = (src) => { if (src && mainImage) mainImage.src = src; };
-  document.querySelectorAll(".pd-thumb").forEach((thumb) => {
+  const caption = document.querySelector("#pd-caption");
+  const variantType = document.querySelector(".pd-gallery")?.dataset.variantType || "";
+  const thumbs = [...document.querySelectorAll(".pd-thumb")];
+  const variantInputs = [...document.querySelectorAll("input[name='variant_id']")];
+  const generalImage = thumbs.find((thumb) => !thumb.dataset.label)?.dataset.image;
+
+  // Shows a photo, marks its thumbnail, and captions it with the shade it belongs to.
+  // The checked shade wins when several shades share one photo.
+  const showImage = (src) => {
+    if (!src || !mainImage) return;
+    mainImage.src = src;
+    thumbs.forEach((thumb) => thumb.setAttribute("aria-pressed", String(thumb.dataset.image === src)));
+    const checked = variantInputs.find((input) => input.checked);
+    const owner = checked?.dataset.image === src ? checked : variantInputs.find((input) => input.dataset.image === src);
+    if (caption) {
+      caption.hidden = !owner;
+      caption.textContent = owner ? `${variantType}: ${owner.dataset.label}${owner.disabled ? " (sold out)" : ""}` : "";
+    }
+  };
+
+  thumbs.forEach((thumb) => {
     thumb.addEventListener("click", () => {
-      showImage(thumb.dataset.image);
-      document.querySelectorAll(".pd-thumb").forEach((other) => other.setAttribute("aria-pressed", String(other === thumb)));
+      // A photo that belongs to an available shade selects that shade, exactly as tapping the shade would.
+      const shade = variantInputs.find((input) => input.dataset.image === thumb.dataset.image && !input.disabled);
+      if (shade) {
+        shade.checked = true;
+        syncVariant();
+      } else {
+        showImage(thumb.dataset.image);
+      }
     });
   });
 
@@ -71,19 +97,22 @@
     });
   });
 
-  const variants = document.querySelectorAll("input[name='variant_id']");
   const variantLabel = document.querySelector("#variant-choice");
-  const syncVariant = () => {
-    const selected = document.querySelector("input[name='variant_id']:checked");
+  function syncVariant() {
+    const selected = variantInputs.find((input) => input.checked);
     if (!selected) return;
-    showImage(selected.dataset.image);
+    if (selected.dataset.image) showImage(selected.dataset.image);
+    // A shade without a photo shows the general product photo, never another shade's photo.
+    else if (generalImage) showImage(generalImage);
+    else if (caption) caption.hidden = true;
     if (variantLabel) variantLabel.textContent = selected.dataset.label;
     const stock = Number(selected.dataset.stock || 0);
     quantity.max = Math.max(stock, 1);
     if (Number(quantity.value) > stock) quantity.value = Math.max(stock, 1);
     addButton.disabled = stock < 1;
     addButton.textContent = stock < 1 ? "This option is sold out" : addLabel;
-  };
-  variants.forEach((input) => input.addEventListener("change", syncVariant));
-  syncVariant();
+  }
+  variantInputs.forEach((input) => input.addEventListener("change", syncVariant));
+  if (variantInputs.some((input) => input.checked)) syncVariant();
+  else showImage(mainImage?.getAttribute("src"));
 </script>
