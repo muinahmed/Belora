@@ -864,3 +864,9 @@ td a:not(.btn):hover { text-decoration: underline; }
   .wa-float span { display: none; }
   .has-sticky-buy .wa-float { bottom: calc(68px + 66px + 14px + env(safe-area-inset-bottom, 0px)); }
 }
+
+/* Long filter lists: extra options behind "Show more". */
+.filter-more { clear: both; }
+.filter-more summary { list-style: none; padding: 6px 0 2px; color: var(--rust); font-size: .9rem; font-weight: 500; text-decoration: underline; text-underline-offset: 4px; cursor: pointer; }
+.filter-more summary::-webkit-details-marker { display: none; }
+.filter-more[open] summary { display: none; }

@@ -797,7 +797,7 @@ async function handleRequest(request, info) {
         categoryIds = collectionIds ? scoped.ids.filter(id => collectionIds.includes(id)) : scoped.ids;
       }
 
-      const listing = listProducts({
+      const filters = {
         q: state.q,
         categoryIds,
         minPrice: state.min_price === "" ? null : state.min_price,
@@ -806,11 +806,10 @@ async function handleRequest(request, info) {
         material: state.material,
         design: state.design,
         inStock: Boolean(state.in_stock),
-        onSale: Boolean(state.sale),
-        sort: state.sort,
-        page: Number(params.get("page")) || 1
-      });
-      const facets = listingFacets(categoryIds);
+        onSale: Boolean(state.sale)
+      };
+      const listing = listProducts({ ...filters, sort: state.sort, page: Number(params.get("page")) || 1 });
+      const facets = listingFacets(filters);
 
       let title = "Shop all";
       let intro = "Jewellery, makeup and skincare, with new pieces added every week.";
@@ -853,15 +852,22 @@ async function handleRequest(request, info) {
           `<a href="/collections/${entry.key}">${entry.title} <span>${countActive(map[entry.key].ids)}</span></a>`).join("")}</nav>`;
       }
 
+      const FILTER_VISIBLE = 6;
       const radioGroup = (name, legend, options) => {
         if (!options.length && !state[name]) return "";
         const values = options.some(option => option.value.toLowerCase() === state[name].toLowerCase()) || !state[name]
           ? options
           : [{ value: state[name], count: null }, ...options];
+        const isChosen = (option) => state[name].toLowerCase() === option.value.toLowerCase();
+        const optionHtml = (option) => `<label class="filter-option"><input type="radio" name="${name}" value="${escapeHtml(option.value)}" ${isChosen(option) ? "checked" : ""}><span>${escapeHtml(option.value)}</span>${option.count ? `<small>${option.count}</small>` : ""}</label>`;
+        // Long lists show the first few; the rest open under "Show more" (already open when the choice is among them).
+        const shown = values.slice(0, FILTER_VISIBLE);
+        const more = values.slice(FILTER_VISIBLE);
         return `<fieldset class="filter-group">
           <legend>${legend}</legend>
           <label class="filter-option"><input type="radio" name="${name}" value="" ${!state[name] ? "checked" : ""}><span>Any</span></label>
-          ${values.map(option => `<label class="filter-option"><input type="radio" name="${name}" value="${escapeHtml(option.value)}" ${state[name].toLowerCase() === option.value.toLowerCase() ? "checked" : ""}><span>${escapeHtml(option.value)}</span>${option.count ? `<small>${option.count}</small>` : ""}</label>`).join("")}
+          ${shown.map(optionHtml).join("")}
+          ${more.length ? `<details class="filter-more" ${more.some(isChosen) ? "open" : ""}><summary>Show ${more.length} more</summary>${more.map(optionHtml).join("")}</details>` : ""}
         </fieldset>`;
       };
       const filterGroups = [

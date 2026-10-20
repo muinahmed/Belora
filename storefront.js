@@ -172,28 +172,38 @@ export function listProducts(filters) {
   return { items, total, page, pages };
 }
 
-// Filter values that actually exist within the current category scope.
-export function listingFacets(categoryIds) {
-  const scope = categoryIds ? (categoryIds.length ? `AND p.category_id IN (${inList(categoryIds)})` : "AND 0") : "";
-  const params = categoryIds ?? [];
-  const distinct = (column) => db.query(`
-    SELECT MIN(TRIM(p.${column})), COUNT(*) FROM products p
-    WHERE p.is_active = 1 AND TRIM(COALESCE(p.${column}, '')) <> '' ${scope}
-    GROUP BY LOWER(TRIM(p.${column})) ORDER BY COUNT(*) DESC, 1 LIMIT 12
-  `, params).map(([value, count]) => ({ value, count: Number(count) }));
+// Filter values for the products currently listed. Each group ignores its own filter,
+// so its other options stay visible to switch to, but respects every other filter:
+// on the Sale page only sale products' shades and materials appear.
+export function listingFacets(filters) {
+  const without = (...keys) => listingWhere({ ...filters, ...Object.fromEntries(keys.map(key => [key, null])) });
+  const FROM = "FROM products p LEFT JOIN categories c ON c.id = p.category_id";
+  const distinct = (column, filterKey) => {
+    const { sql, params } = without(filterKey);
+    return db.query(`
+      SELECT MIN(TRIM(p.${column})), COUNT(*) ${FROM}
+      ${sql} AND TRIM(COALESCE(p.${column}, '')) <> ''
+      GROUP BY LOWER(TRIM(p.${column})) ORDER BY COUNT(*) DESC, 1 LIMIT 12
+    `, params).map(([value, count]) => ({ value, count: Number(count) }));
+  };
+  const shadeScope = without("design");
   const shades = db.query(`
     SELECT MIN(TRIM(v.variant_value)), COUNT(DISTINCT p.id) FROM product_variants v JOIN products p ON p.id = v.product_id
-    WHERE p.is_active = 1 AND TRIM(v.variant_value) <> '' ${scope}
+    LEFT JOIN categories c ON c.id = p.category_id
+    ${shadeScope.sql} AND TRIM(v.variant_value) <> ''
     GROUP BY LOWER(TRIM(v.variant_value)) ORDER BY COUNT(DISTINCT p.id) DESC, 1 LIMIT 16
-  `, params).map(([value, count]) => ({ value, count: Number(count) }));
-  const range = db.query(`SELECT MIN(${PRICE_SQL}), MAX(${PRICE_SQL}), SUM(${ON_SALE_SQL}) FROM products p WHERE p.is_active = 1 ${scope}`, params)[0];
+  `, shadeScope.params).map(([value, count]) => ({ value, count: Number(count) }));
+  const priceScope = without("minPrice", "maxPrice");
+  const range = db.query(`SELECT MIN(${PRICE_SQL}), MAX(${PRICE_SQL}) ${FROM} ${priceScope.sql}`, priceScope.params)[0];
+  const saleScope = without("onSale");
+  const saleCount = db.query(`SELECT COUNT(*) ${FROM} ${saleScope.sql} AND ${ON_SALE_SQL}`, saleScope.params)[0][0];
   return {
-    materials: distinct("material"),
-    skinConcerns: distinct("skin_concern"),
+    materials: distinct("material", "material"),
+    skinConcerns: distinct("skin_concern", "skinConcern"),
     shades,
     minPrice: range[0] === null ? null : Math.floor(Number(range[0])),
     maxPrice: range[1] === null ? null : Math.ceil(Number(range[1])),
-    saleCount: Number(range[2] ?? 0)
+    saleCount: Number(saleCount ?? 0)
   };
 }
 
