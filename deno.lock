@@ -13,7 +13,7 @@
   },
   "jsr": {
     "@db/sqlite@0.13.0": {
-      "integrity": "4545c635e0b3d4ddfdc0f2240f932f24b8ad0178e9c2e3a0f9403e7b18ae2fb5",
+      "integrity": "6f1d5257d4299c7409877a47781922a2a0be5cedaad454f3952b5a867ef14429",
       "dependencies": [
         "jsr:@denosaurs/plug",
         "jsr:@std/path@1.0"
