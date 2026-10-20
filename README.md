@@ -30,6 +30,10 @@ Credentials come from the `ADMIN_USERNAME` and `ADMIN_PASSWORD` environment vari
 | `FACEBOOK_URL`, `INSTAGRAM_URL`, `TIKTOK_URL` | Optional. Full `https://` links shown in the footer. |
 | `RETURNS_POLICY` | Optional. Text shown under "Delivery and returns" on product pages. Set this to your real policy. |
 
+## Dependencies
+
+Third-party code (the SQLite driver and its helpers) is kept in `vendor/` and committed (`"vendor": true` in `deno.json`). Builds therefore don't download from jsr.io, which has served the same package metadata with different byte orderings, so lockfile integrity checks failed at random. After changing a dependency, run `deno install --entrypoint main.js` and commit `vendor/` and `deno.lock`.
+
 ## Railway deployment
 
 1. Add a Railway Volume mounted at `/app/data`.
