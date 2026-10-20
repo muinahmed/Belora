@@ -459,7 +459,7 @@ textarea { min-height: 96px; resize: vertical; }
 .stat-card:hover { border-color: var(--charcoal); }
 .stat-card span { color: var(--ink-soft); font-size: .9rem; }
 .stat-card strong { display: block; margin-top: 8px; font-family: var(--display); font-size: 2.2rem; font-weight: 500; line-height: 1; }
-.analytics-panel { margin-bottom: 24px; }
+.analytics-panel, .backup-panel { margin-bottom: 24px; }
 .analytics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 0; }
 .analytics-grid dt { color: var(--ink-soft); font-size: .9rem; }
 .analytics-grid dd { margin: 4px 0 0; font-size: 1.6rem; font-variant-numeric: tabular-nums; }
@@ -817,3 +817,50 @@ td a:not(.btn):hover { text-decoration: underline; }
   background: var(--cream); color: var(--ink-soft); font-size: .62rem; line-height: 1.15;
 }
 .swatch-name { display: grid; gap: 1px; }
+
+/* ---------- Batch 1 additions ---------- */
+[hidden] { display: none !important; }
+
+/* Sale banner with fewer than four sale products: copy only, set in a row. */
+.sale-inner-text { grid-template-columns: 1fr; }
+.sale-inner-text .sale-copy { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 40px; }
+.sale-inner-text .sale-copy h2, .sale-inner-text .sale-copy p { margin-bottom: 0; }
+.sale-inner-text .sale-copy p { flex: 1 1 280px; }
+
+/* Footer with a "Contact us" column. */
+.footer-grid.has-contact { grid-template-columns: 1.4fr 1fr 1.2fr 1fr; }
+@media (max-width: 900px) { .footer-grid.has-contact { grid-template-columns: 1fr; } }
+
+/* bKash / Nagad payment instructions at checkout. */
+.payment-steps { padding: 14px 16px; background: var(--cream); border-left: 3px solid var(--rust); font-size: .95rem; }
+.payment-number { font-size: 1.05rem; letter-spacing: .04em; white-space: nowrap; }
+.transaction-field input { text-transform: uppercase; letter-spacing: .06em; }
+.transaction-field input::placeholder { text-transform: none; letter-spacing: normal; }
+
+/* Floating WhatsApp button. */
+.wa-float {
+  position: fixed; z-index: 45; right: 20px; bottom: 20px;
+  display: inline-flex; align-items: center; gap: 8px; min-height: 52px; padding: 0 18px 0 14px;
+  border-radius: 999px; background: #1F8F4E; color: var(--white);
+  font-weight: 500; box-shadow: 0 6px 20px rgba(43, 35, 29, .22); transition: background-color .2s, bottom .2s;
+}
+.wa-float:hover { background: #18723E; }
+.wa-float svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+
+/* Phones: the sticky "Add to bag" bar sits above the bottom navigation. */
+.pd-sticky { display: none; }
+@media (max-width: 620px) {
+  .pd-sticky:not([hidden]) {
+    position: fixed; z-index: 39; left: 0; right: 0; bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+    display: flex; align-items: center; gap: 12px; padding: 10px var(--gutter);
+    background: rgba(251, 248, 243, .98); border-top: 1px solid var(--line); box-shadow: 0 -4px 16px rgba(43, 35, 29, .06);
+  }
+  .pd-sticky-text { display: grid; min-width: 0; flex: 1; line-height: 1.3; }
+  .pd-sticky-name { font-size: .85rem; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pd-sticky-price { font-weight: 600; }
+  .pd-sticky .btn { flex: none; min-height: 46px; padding-inline: 22px; }
+
+  .wa-float { right: 14px; bottom: calc(68px + 14px + env(safe-area-inset-bottom, 0px)); width: 52px; padding: 0; justify-content: center; }
+  .wa-float span { display: none; }
+  .has-sticky-buy .wa-float { bottom: calc(68px + 66px + 14px + env(safe-area-inset-bottom, 0px)); }
+}

@@ -10,13 +10,29 @@ const publicDir = "./public";
 const dataDir = Deno.env.get("DATA_DIR") || publicDir;
 const uploadDir = `${dataDir}/uploads/products`;
 const PORT = Number(Deno.env.get("PORT") || 8000);
-const carts = new Map();
-const sessions = new Map();
 
 const ADMIN_USERNAME = Deno.env.get("ADMIN_USERNAME")?.trim();
 const ADMIN_PASSWORD = Deno.env.get("ADMIN_PASSWORD");
 const SHOP_WHATSAPP_NUMBER = (Deno.env.get("SHOP_WHATSAPP_NUMBER") || "").replace(/\D/g, "");
+// Footer contact details. Social links must be full https:// addresses; anything else is ignored.
+const socialLink = (name) => {
+  const value = (Deno.env.get(name) || "").trim();
+  return /^https:\/\/[^\s"'<>]+$/.test(value) ? value : "";
+};
+const SHOP_CONTACT = {
+  whatsapp: SHOP_WHATSAPP_NUMBER,
+  phone: (Deno.env.get("SHOP_PHONE") || "").replace(/[^\d+]/g, ""),
+  facebook: socialLink("FACEBOOK_URL"),
+  instagram: socialLink("INSTAGRAM_URL"),
+  tiktok: socialLink("TIKTOK_URL")
+};
 const PUBLIC_BASE_URL = (Deno.env.get("PUBLIC_BASE_URL") || "").replace(/\/$/, "");
+// Numbers customers send bKash / Nagad payments to. When one is set, checkout shows it
+// and asks for the transaction ID; when it isn't, the method is only recorded as before.
+const PAYMENT_NUMBERS = {
+  bKash: normalizeBdPhone(Deno.env.get("BKASH_NUMBER") || ""),
+  Nagad: normalizeBdPhone(Deno.env.get("NAGAD_NUMBER") || "")
+};
 
 if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
   throw new Error("ADMIN_USERNAME and ADMIN_PASSWORD environment variables must be set.");
@@ -35,7 +51,7 @@ function slugify(value = "") {
 
 function page(title, content, options = {}) {
   const description = options.description || `Shop jewellery, makeup and skincare at ${BRAND}, with cash on delivery across Bangladesh.`;
-  const image = options.image || "/images/beauty-hero-banner.png";
+  const image = options.image || "/images/beauty-hero-banner.jpg";
   const absolute = (path) => PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}${path}` : path;
   return `<!doctype html>
 <html lang="en">
@@ -57,7 +73,7 @@ function page(title, content, options = {}) {
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..700;1,6..96,400..600&family=Jost:wght@400;500;600&display=swap">
-  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/style.css?v=${STYLESHEET_VERSION}">
 </head>
 <body>
 <a class="skip-link" href="#main-content">Skip to content</a>
@@ -82,9 +98,44 @@ function cookie(request, name) {
   return null;
 }
 
-function cartIdFor(request) {
-  return cookie(request, "spark_cart");
+// Cart and admin session ids are random UUIDs; anything else in the cookie is ignored.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const CART_MAX_AGE_DAYS = 30;
+const ADMIN_SESSION_HOURS = 12;
+
+function isSecureRequest(request) {
+  return new URL(request.url).protocol === "https:" || request.headers.get("x-forwarded-proto") === "https";
 }
+
+function cartIdFor(request) {
+  const id = cookie(request, "spark_cart");
+  return id && UUID_PATTERN.test(id) ? id : null;
+}
+
+// Bags are stored in the database so they survive restarts and redeploys.
+const carts = {
+  get(id) {
+    if (!id) return undefined;
+    const row = db.query("SELECT items FROM carts WHERE id = ?", [id])[0];
+    if (!row) return undefined;
+    try {
+      const items = JSON.parse(row[0]);
+      return Array.isArray(items) ? items : [];
+    } catch {
+      return [];
+    }
+  },
+  has(id) {
+    return Boolean(id) && db.query("SELECT 1 FROM carts WHERE id = ?", [id]).length > 0;
+  },
+  set(id, items) {
+    if (!id) return;
+    db.query(
+      "INSERT INTO carts (id, items, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET items = excluded.items, updated_at = excluded.updated_at",
+      [id, JSON.stringify(items), Date.now()]
+    );
+  }
+};
 
 function getCart(request) {
   const id = cartIdFor(request);
@@ -108,7 +159,7 @@ function cartResponse(request, response, cartId = null) {
   const headers = new Headers(response.headers);
   headers.append(
     "Set-Cookie",
-    `spark_cart=${encodeURIComponent(id)}; Path=/; HttpOnly; SameSite=Lax`
+    `spark_cart=${encodeURIComponent(id)}; Path=/; Max-Age=${CART_MAX_AGE_DAYS * 24 * 60 * 60}; HttpOnly; SameSite=Lax${isSecureRequest(request) ? "; Secure" : ""}`
   );
   return new Response(response.body, {
     status: response.status,
@@ -118,7 +169,45 @@ function cartResponse(request, response, cartId = null) {
 
 function isAdmin(request) {
   const token = cookie(request, "spark_admin");
-  return Boolean(token && sessions.has(token));
+  if (!token || !UUID_PATTERN.test(token)) return false;
+  return db.query("SELECT 1 FROM admin_sessions WHERE token = ? AND expires_at > ?", [token, Date.now()]).length > 0;
+}
+
+// Compares secrets without leaking, through response timing, how much of a guess was right.
+async function sameSecret(given = "", expected = "") {
+  const encoder = new TextEncoder();
+  const [a, b] = await Promise.all([given, expected].map(value =>
+    crypto.subtle.digest("SHA-256", encoder.encode(String(value)))
+  ));
+  const left = new Uint8Array(a);
+  const right = new Uint8Array(b);
+  let difference = 0;
+  for (let index = 0; index < left.length; index++) difference |= left[index] ^ right[index];
+  return difference === 0;
+}
+
+// At most LOGIN_LIMIT failed admin logins per address in LOGIN_WINDOW_MS.
+const LOGIN_LIMIT = 5;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const loginFailures = new Map();
+
+function recentLoginFailures(ip) {
+  const cutoff = Date.now() - LOGIN_WINDOW_MS;
+  const recent = (loginFailures.get(ip) ?? []).filter(time => time > cutoff);
+  if (recent.length) loginFailures.set(ip, recent);
+  else loginFailures.delete(ip);
+  return recent;
+}
+
+// Removes abandoned bags, expired admin logins and old analytics. Runs at startup and every 6 hours.
+function cleanUpStoredData() {
+  try {
+    db.query("DELETE FROM carts WHERE updated_at < ?", [Date.now() - CART_MAX_AGE_DAYS * 24 * 60 * 60 * 1000]);
+    db.query("DELETE FROM admin_sessions WHERE expires_at <= ?", [Date.now()]);
+    db.query("DELETE FROM analytics_events WHERE created_at < datetime('now', '-90 days')");
+  } catch (error) {
+    console.error("Cleanup failed", error);
+  }
 }
 
 function adminGuard(request) {
@@ -135,7 +224,7 @@ function storeHeader(request, active = "", query = "") {
 }
 
 function storeFooter() {
-  return siteFooter(SHOP_WHATSAPP_NUMBER);
+  return siteFooter(SHOP_CONTACT);
 }
 
 function html(body, status = 200) {
@@ -294,6 +383,7 @@ function imageMime(path) {
   if (lower.endsWith(".png")) return "image/png";
   if (lower.endsWith(".webp")) return "image/webp";
   if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".svg")) return "image/svg+xml";
   return "image/jpeg";
 }
 
@@ -324,27 +414,42 @@ function imageProblem(file) {
   return null;
 }
 
+// The browser-reported type can be anything, so the file's first bytes decide what it is.
+async function detectImageType(file) {
+  const bytes = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+  const ascii = (start, end) => String.fromCharCode(...bytes.slice(start, end));
+  if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) return "jpg";
+  if (bytes[0] === 0x89 && ascii(1, 4) === "PNG") return "png";
+  if (ascii(0, 4) === "GIF8") return "gif";
+  if (ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP") return "webp";
+  return null;
+}
+
+// Checks every upload in a form, including its contents. Returns the first problem, or null.
+async function uploadsProblem(files) {
+  for (const file of files) {
+    const problem = imageProblem(file);
+    if (problem) return problem;
+    if (file instanceof File && file.size > 0 && !await detectImageType(file)) {
+      return `"${file.name}" is not a JPG, PNG, WebP or GIF photo. Please upload a different file.`;
+    }
+  }
+  return null;
+}
+
 async function saveUploadedImage(file) {
   if (!(file instanceof File) || file.size === 0) return null;
   const problem = imageProblem(file);
   if (problem) throw new Error(problem);
+  const extension = await detectImageType(file);
+  if (!extension) throw new Error(`"${file.name}" is not a JPG, PNG, WebP or GIF photo.`);
 
-  const originalExtension = file.name.includes(".")
-    ? file.name.split(".").pop().toLowerCase()
-    : "jpg";
-
-  const allowed = ["jpg", "jpeg", "png", "webp", "gif"];
-  const extension = allowed.includes(originalExtension) ? originalExtension : "jpg";
   const fileName = `${crypto.randomUUID()}.${extension}`;
   const diskPath = `${uploadDir}/${fileName}`;
-const webPath = `/uploads/products/${fileName}`;
+  const webPath = `/uploads/products/${fileName}`;
 
-await Deno.mkdir(uploadDir, { recursive: true });
-
-await Deno.writeFile(
-  diskPath,
-  new Uint8Array(await file.arrayBuffer())
-);
+  await Deno.mkdir(uploadDir, { recursive: true });
+  await Deno.writeFile(diskPath, new Uint8Array(await file.arrayBuffer()));
 
   return { diskPath, webPath };
 }
@@ -484,6 +589,13 @@ async function renderCheckout(request, details, { error = "", values = {}, statu
     EMAIL: escapeHtml(values.email ?? ""),
     ADDRESS: escapeHtml(values.address ?? ""),
     NOTES: escapeHtml(values.notes ?? ""),
+    TRANSACTION_ID: escapeHtml(values.transactionId ?? ""),
+    PAYMENT_STEPS: ["bKash", "Nagad"].map(method => PAYMENT_NUMBERS[method]
+      ? `<div class="payment-steps" data-method="${method}" ${payment === method ? "" : "hidden"}>
+          <p><b>Pay with ${method}:</b> use <b>Send Money</b> to <b class="payment-number">${PAYMENT_NUMBERS[method]}</b> for your order total of <b class="payment-total">${taka(subtotal + DELIVERY_CHARGES[area])}</b>, then enter the transaction ID from your ${method} message below.</p>
+        </div>`
+      : "").join(""),
+    TRANSACTION_HIDDEN: PAYMENT_NUMBERS[payment] ? "" : "hidden",
     DISTRICT_PLACEHOLDER_SELECTED: DISTRICTS.includes(values.district) ? "" : "selected",
     INSIDE_CHECKED: checked(area === "Inside Dhaka"),
     OUTSIDE_CHECKED: checked(area === "Outside Dhaka"),
@@ -499,33 +611,71 @@ async function renderCheckout(request, details, { error = "", values = {}, statu
   }), { noindex: true }), status);
 }
 
-Deno.serve({ port: PORT }, async (request, info) => {
+// The stylesheet is read once. Its link carries a content hash, so browsers can keep it
+// for a year and still fetch the new file straight after a deploy changes it.
+const STYLESHEET = await Deno.readTextFile(`${publicDir}/css/style.css`);
+const STYLESHEET_VERSION = Array.from(
+  new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(STYLESHEET))).slice(0, 6),
+  byte => byte.toString(16).padStart(2, "0")
+).join("");
+
+// Inline scripts and styles are part of the pages, so they stay allowed; everything else
+// must come from this site or Google Fonts, and no other site may frame these pages.
+const SECURITY_HEADERS = {
+  "Content-Security-Policy": [
+    "default-src 'self'",
+    "img-src 'self' data:",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    "script-src 'self' 'unsafe-inline'",
+    "form-action 'self'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+    "object-src 'none'"
+  ].join("; "),
+  "X-Frame-Options": "DENY",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=()"
+};
+
+function withSecurityHeaders(response) {
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+    if (!headers.has(name)) headers.set(name, value);
+  }
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+cleanUpStoredData();
+setInterval(cleanUpStoredData, 6 * 60 * 60 * 1000);
+
+Deno.serve({ port: PORT }, async (request, info) => withSecurityHeaders(await handleRequest(request, info)));
+
+async function handleRequest(request, info) {
   const url = new URL(request.url);
 
   try {
     // ---------- Static files ----------
     if (url.pathname === "/css/style.css") {
-      const css = await Deno.readTextFile("./public/css/style.css");
-      return new Response(css, { headers: { "content-type": "text/css; charset=utf-8" } });
+      const versioned = url.searchParams.get("v") === STYLESHEET_VERSION;
+      return new Response(STYLESHEET, {
+        headers: {
+          "content-type": "text/css; charset=utf-8",
+          "cache-control": versioned ? "public, max-age=31536000, immutable" : "public, max-age=300"
+        }
+      });
     }
 
     if (url.pathname.startsWith("/images/")) {
-  const safePath = url.pathname.replaceAll("..", "");
-
-  try {
-    const data = await Deno.readFile(
-  `${publicDir}${safePath}`
-);
-
-    return new Response(data, {
-      headers: {
-        "content-type": imageMime(safePath)
+      const safePath = url.pathname.replaceAll("..", "");
+      try {
+        const data = await Deno.readFile(`${publicDir}${safePath}`);
+        return new Response(data, { headers: { "content-type": imageMime(safePath), "cache-control": "public, max-age=86400" } });
+      } catch {
+        return new Response("Image not found", { status: 404 });
       }
-    });
-  } catch {
-    return new Response("Image not found", { status: 404 });
-  }
-}
+    }
 
     if (url.pathname.startsWith("/uploads/products/")) {
       const safePath = url.pathname.replaceAll("..", "");
@@ -565,17 +715,22 @@ Deno.serve({ port: PORT }, async (request, info) => {
         </a>`;
       }).join("");
 
+      // The sale grid needs four products to fill its row; with fewer, the banner is text only.
       const saleItems = shelf("sale", 4);
       const saleBanner = saleItems.length ? `<section class="sale-banner">
-        <div class="wrap sale-inner">
+        <div class="wrap sale-inner${saleItems.length < 4 ? " sale-inner-text" : ""}">
           <div class="sale-copy">
             <h2>The sale edit</h2>
             <p>Selected jewellery, makeup and skincare at reduced prices, while stock lasts.</p>
             <a class="btn btn-dark" href="/products?sale=1">Shop the sale</a>
           </div>
-          ${productGrid(saleItems, "grid-compact")}
+          ${saleItems.length >= 4 ? productGrid(saleItems, "grid-compact") : ""}
         </div>
       </section>` : "";
+
+      // New arrivals fill whole rows of four: 5 to 7 products show as 4, never 4 plus a straggler.
+      const newest = shelf("newest", 8);
+      const newArrivals = newest.length > 4 ? newest.slice(0, newest.length >= 8 ? 8 : 4) : newest;
 
       const assurance = [
         ["Delivery across Bangladesh", `${taka(DELIVERY_CHARGES["Inside Dhaka"])} inside Dhaka and ${taka(DELIVERY_CHARGES["Outside Dhaka"])} everywhere else.`],
@@ -590,7 +745,7 @@ Deno.serve({ port: PORT }, async (request, info) => {
         HEADER: storeHeader(request, "home"),
         FOOTER: storeFooter(),
         COLLECTION_TILES: tiles,
-        NEW_ARRIVALS: shelfSection("New arrivals", shelf("newest", 8), "/products?sort=newest", "View all"),
+        NEW_ARRIVALS: shelfSection("New arrivals", newArrivals, "/products?sort=newest", "View all"),
         SALE_BANNER: saleBanner,
         BESTSELLERS: shelfSection("Bestsellers", shelf("bestsellers", 4), "", ""),
         FEATURED: shelfSection("Our picks", shelf("featured", 4), "/products?sort=featured", "View all", "shelf-soft"),
@@ -846,7 +1001,7 @@ Deno.serve({ port: PORT }, async (request, info) => {
       }
       crumbs.push([product.name, ""]);
 
-      const related = relatedProducts(product.id, product.categoryId, 4);
+      const related = relatedProducts(product.id, product.categoryId, 4, collection ? collections[collection.key].ids : []);
       const absolute = (path) => PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}${path}` : `${url.origin}${path}`;
       const jsonLd = JSON.stringify({
         "@context": "https://schema.org",
@@ -877,6 +1032,7 @@ Deno.serve({ port: PORT }, async (request, info) => {
         CATEGORY: escapeHtml(product.categoryName),
         NAME: escapeHtml(product.name),
         PRICE_HTML: priceHtml,
+        STICKY_PRICE: taka(product.unitPrice),
         STOCK_CLASS: stockClass,
         STOCK_TEXT: stockText,
         DESCRIPTION: product.description ? `<div class="pd-desc">${paragraphs(product.description)}</div>` : "",
@@ -1065,7 +1221,8 @@ Deno.serve({ port: PORT }, async (request, info) => {
         payment: field("payment_method"),
         deliveryArea: field("delivery_area"),
         district: field("district"),
-        notes: field("order_notes")
+        notes: field("order_notes"),
+        transactionId: field("transaction_id").replace(/\s+/g, "").toUpperCase()
       };
       const retry = (error, status = 400) => renderCheckout(request, details, { error, values, status });
 
@@ -1090,6 +1247,16 @@ Deno.serve({ port: PORT }, async (request, info) => {
       if (values.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email)) {
         return retry("Please enter a valid email address, or leave it empty.");
       }
+      // With a payment number set, a bKash / Nagad order needs the transaction ID of the payment.
+      const transactionId = PAYMENT_NUMBERS[values.payment] ? values.transactionId : "";
+      if (PAYMENT_NUMBERS[values.payment]) {
+        if (!/^[A-Z0-9]{6,20}$/.test(transactionId)) {
+          return retry(`Please send the payment by ${values.payment} and enter the transaction ID from your ${values.payment} message (letters and numbers only).`);
+        }
+        if (db.query("SELECT 1 FROM orders WHERE transaction_id = ? AND status <> 'Cancelled'", [transactionId]).length) {
+          return retry("This transaction ID has already been used for another order. Please check it, or contact us if you need help.");
+        }
+      }
       const { name, address, payment, deliveryArea, district } = values;
       const email = values.email || null;
       const orderNotes = values.notes || null;
@@ -1110,13 +1277,14 @@ Deno.serve({ port: PORT }, async (request, info) => {
       const total = subtotal + deliveryCharge;
 
       let orderId;
+      const publicToken = crypto.randomUUID();
       db.exec("BEGIN IMMEDIATE");
       try {
       db.query(`
         INSERT INTO orders
-        (customer_name, phone, email, address, payment_method, status, delivery_area, district, subtotal, delivery_charge, order_notes, total)
-        VALUES (?, ?, ?, ?, ?, 'Pending', ?, ?, ?, ?, ?, ?)
-      `, [name, phone, email, address, payment, deliveryArea, district, subtotal, deliveryCharge, orderNotes, total]);
+        (customer_name, phone, email, address, payment_method, status, delivery_area, district, subtotal, delivery_charge, order_notes, total, public_token, transaction_id)
+        VALUES (?, ?, ?, ?, ?, 'Pending', ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [name, phone, email, address, payment, deliveryArea, district, subtotal, deliveryCharge, orderNotes, total, publicToken, transactionId || null]);
 
       orderId = db.query("SELECT last_insert_rowid()")[0][0];
 
@@ -1160,17 +1328,19 @@ Deno.serve({ port: PORT }, async (request, info) => {
       trackEvent("order_complete");
       recordCheckout(clientIp);
 
-      return redirect(`/order-success/${orderId}`);
+      return redirect(`/order-success/${publicToken}`);
     }
 
+    // Looked up by the order's random token, never its number, so orders can't be browsed.
     if (url.pathname.startsWith("/order-success/") && request.method === "GET") {
-      const orderId = Number(url.pathname.split("/")[2]);
-      const row = db.query(
-        "SELECT customer_name, total, payment_method FROM orders WHERE id = ?",
-        [orderId]
-      );
+      const token = url.pathname.split("/")[2] ?? "";
+      const row = UUID_PATTERN.test(token) ? db.query(
+        "SELECT customer_name, total, payment_method, id, transaction_id FROM orders WHERE public_token = ?",
+        [token]
+      ) : [];
 
       if (!row.length) return notFound(request);
+      const orderId = row[0][3];
 
       return html(page("Order placed", `${storeHeader(request)}<main id="main-content" class="wrap success-page">
           <div class="success-card">
@@ -1179,6 +1349,7 @@ Deno.serve({ port: PORT }, async (request, info) => {
             <p>Your order number is <strong>#${orderId}</strong>. Keep it handy if you contact us about delivery.</p>
             <dl class="summary-lines">
               <div><dt>Payment</dt><dd>${escapeHtml(row[0][2])}</dd></div>
+              ${row[0][4] ? `<div><dt>Transaction ID</dt><dd>${escapeHtml(row[0][4])}</dd></div>` : ""}
               <div class="summary-total"><dt>Total</dt><dd>${taka(row[0][1])}</dd></div>
             </dl>
             <div class="success-actions">
@@ -1200,33 +1371,49 @@ Deno.serve({ port: PORT }, async (request, info) => {
     }
 
     if (url.pathname === "/admin/login" && request.method === "POST") {
-      const form = await request.formData();
-      const username = form.get("username")?.toString();
-      const password = form.get("password")?.toString();
-
-      if (username !== ADMIN_USERNAME || password !== ADMIN_PASSWORD) {
-        const html = await readView("admin/login.html");
+      const loginError = async (message, status) => {
+        const view = await readView("admin/login.html");
         return new Response(
-          html.replace("{{ERROR}}", `<p class="error-box">Invalid username or password.</p>`),
-          { status: 401, headers: { "content-type": "text/html; charset=utf-8" } }
+          view.replace("{{ERROR}}", `<p class="error-box">${escapeHtml(message)}</p>`),
+          { status, headers: { "content-type": "text/html; charset=utf-8" } }
         );
+      };
+
+      const clientIp = clientAddress(request, info);
+      if (recentLoginFailures(clientIp).length >= LOGIN_LIMIT) {
+        return loginError("Too many failed attempts. Please wait 15 minutes and try again.", 429);
       }
 
+      const form = await request.formData();
+      const username = form.get("username")?.toString() ?? "";
+      const password = form.get("password")?.toString() ?? "";
+
+      const [usernameOk, passwordOk] = await Promise.all([
+        sameSecret(username.trim(), ADMIN_USERNAME),
+        sameSecret(password, ADMIN_PASSWORD)
+      ]);
+      if (!usernameOk || !passwordOk) {
+        loginFailures.set(clientIp, [...recentLoginFailures(clientIp), Date.now()]);
+        return loginError("Invalid username or password.", 401);
+      }
+      loginFailures.delete(clientIp);
+
       const token = crypto.randomUUID();
-      sessions.set(token, { username, createdAt: Date.now() });
+      db.query("INSERT INTO admin_sessions (token, username, expires_at) VALUES (?, ?, ?)", [
+        token, ADMIN_USERNAME, Date.now() + ADMIN_SESSION_HOURS * 60 * 60 * 1000
+      ]);
 
       const response = redirect("/admin/dashboard");
-      const secureCookie = url.protocol === "https:" || request.headers.get("x-forwarded-proto") === "https";
       response.headers.append(
         "Set-Cookie",
-        `spark_admin=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax${secureCookie ? "; Secure" : ""}`
+        `spark_admin=${encodeURIComponent(token)}; Path=/; Max-Age=${ADMIN_SESSION_HOURS * 60 * 60}; HttpOnly; SameSite=Lax${isSecureRequest(request) ? "; Secure" : ""}`
       );
       return response;
     }
 
     if (url.pathname === "/admin/logout" && request.method === "POST") {
       const token = cookie(request, "spark_admin");
-      if (token) sessions.delete(token);
+      if (token) db.query("DELETE FROM admin_sessions WHERE token = ?", [token]);
 
       const response = redirect("/");
       response.headers.append(
@@ -1272,6 +1459,11 @@ Deno.serve({ port: PORT }, async (request, info) => {
           <form method="POST" action="/admin/analytics/reset" onsubmit="return confirm('Reset all analytics? Views, bag adds, checkouts and order counts will start from zero.')">
             <button class="danger-button" type="submit">Reset analytics</button>
           </form>
+        </section>
+        <section class="panel backup-panel">
+          <h2>Backup</h2>
+          <p class="muted">Download a copy of your products, categories and orders. Save one before every update, and once a week. Product photos are not included.</p>
+          <p><a class="btn" href="/admin/backup">Download backup</a></p>
         </section>
         <div class="admin-grid">
           <a class="action-card" href="/admin/products/add"><h2>Add product</h2><p>Upload a photo, price, stock and variants.</p></a>
@@ -1430,7 +1622,7 @@ return new Response(
       if (sale.error) return productFormError(sale.error);
       const variantPlan = planVariants(variantName, variantValue, variantStock, variantImages);
       if (variantPlan.error) return productFormError(variantPlan.error);
-      const imageError = images.map(imageProblem).find(Boolean);
+      const imageError = await uploadsProblem([...images, ...variantImages]);
       if (imageError) return productFormError(imageError);
 
       const slugBase = slugify(name);
@@ -1545,7 +1737,7 @@ return new Response(
       if (sale.error) return productFormError(sale.error);
       const variantPlan = planVariants(variantName, variantValue, variantStock, variantImages, product.variants);
       if (variantPlan.error) return productFormError(variantPlan.error);
-      const imageError = images.map(imageProblem).find(Boolean);
+      const imageError = await uploadsProblem([...images, ...variantImages]);
       if (imageError) return productFormError(imageError);
 
       let slug = slugify(name) || `product-${id}`;
@@ -1714,11 +1906,11 @@ return redirect("/admin/products");
       const orderParams = [];
       if (status) { orderWhere.push("status = ?"); orderParams.push(status); }
       if (orderSearch) {
-        orderWhere.push("(CAST(id AS TEXT) LIKE ? OR customer_name LIKE ? OR phone LIKE ?)");
-        orderParams.push(`%${orderSearch}%`, `%${orderSearch}%`, `%${orderSearch}%`);
+        orderWhere.push("(CAST(id AS TEXT) LIKE ? OR customer_name LIKE ? OR phone LIKE ? OR transaction_id LIKE ?)");
+        orderParams.push(`%${orderSearch}%`, `%${orderSearch}%`, `%${orderSearch}%`, `%${orderSearch}%`);
       }
       const rows = db.query(`
-        SELECT id, customer_name, phone, payment_method, status, total, created_at
+        SELECT id, customer_name, phone, payment_method, status, total, created_at, transaction_id
         FROM orders ${orderWhere.length ? `WHERE ${orderWhere.join(" AND ")}` : ""} ORDER BY id DESC
       `, orderParams);
 
@@ -1726,7 +1918,7 @@ return redirect("/admin/products");
         <tr>
           <td class="cell-title" data-label="">#${row[0]}</td>
           <td data-label="Customer">${escapeHtml(row[1])}<br><small>${escapeHtml(row[2])}</small></td>
-          <td data-label="Payment">${escapeHtml(row[3])}</td>
+          <td data-label="Payment">${escapeHtml(row[3])}${row[7] ? `<br><small>${escapeHtml(row[7])}</small>` : ""}</td>
           <td data-label="Status"><span class="status">${escapeHtml(row[4])}</span></td>
           <td data-label="Total">৳${Number(row[5]).toFixed(0)}</td>
           <td data-label="Date">${escapeHtml(row[6])}</td>
@@ -1740,7 +1932,7 @@ return redirect("/admin/products");
 
       const content = `
         <div class="page-title"><p class="eyebrow">Sales</p><h1>Orders</h1></div>
-        <form class="search-bar" method="GET" action="/admin/orders"><input name="q" value="${escapeHtml(orderSearch)}" placeholder="Search order number, customer, or phone"><button class="btn" type="submit">Search</button></form>
+        <form class="search-bar" method="GET" action="/admin/orders"><input name="q" value="${escapeHtml(orderSearch)}" placeholder="Search order number, customer, phone or transaction ID"><button class="btn" type="submit">Search</button></form>
         <div class="filters"><a href="/admin/orders">All</a>${filter}</div>
         <div class="table-wrap">
           <table>
@@ -1833,6 +2025,28 @@ return redirect("/admin/products");
       return redirect("/admin/orders");
     }
 
+    // A consistent copy of the whole database, made with VACUUM INTO while the shop keeps running.
+    if (url.pathname === "/admin/backup" && request.method === "GET") {
+      const denied = adminGuard(request);
+      if (denied) return denied;
+      const folder = await Deno.makeTempDir({ prefix: "bellora-backup-" });
+      const path = `${folder}/shop.sqlite`;
+      try {
+        db.exec(`VACUUM INTO '${path.replaceAll("'", "''")}'`);
+        const data = await Deno.readFile(path);
+        const date = new Date().toISOString().slice(0, 10);
+        return new Response(data, {
+          headers: {
+            "content-type": "application/vnd.sqlite3",
+            "content-disposition": `attachment; filename="bellora-backup-${date}.sqlite"`,
+            "cache-control": "no-store"
+          }
+        });
+      } finally {
+        await Deno.remove(folder, { recursive: true }).catch(() => {});
+      }
+    }
+
     if (url.pathname === "/admin/analytics/reset" && request.method === "POST") {
       const denied = adminGuard(request);
       if (denied) return denied;
@@ -1844,12 +2058,12 @@ return redirect("/admin/products");
       const denied = adminGuard(request);
       if (denied) return denied;
       const orderId = Number(url.pathname.split("/")[3]);
-      const order = db.query("SELECT customer_name, phone, address, payment_method, delivery_area, district, delivery_charge, total, order_notes FROM orders WHERE id = ?", [orderId]);
+      const order = db.query("SELECT customer_name, phone, address, payment_method, delivery_area, district, delivery_charge, total, order_notes, transaction_id FROM orders WHERE id = ?", [orderId]);
       if (!order.length) return new Response("Order not found", { status: 404 });
       const items = db.query("SELECT product_name, price, quantity FROM order_items WHERE order_id = ? ORDER BY id", [orderId]);
       const row = order[0];
       const itemRows = items.map(item => `<tr><td>${escapeHtml(item[0])}</td><td>${item[2]}</td><td>${Number(item[1]).toFixed(0)}</td></tr>`).join("");
-      return new Response(page(`Packing slip #${orderId}`, `<main id="main-content" class="print-slip"><h1>${BRAND}</h1><p>Packing slip · Order #${orderId}</p><hr><h2>${escapeHtml(row[0])}</h2><p>${escapeHtml(row[1])}<br>${escapeHtml(row[2])}</p><p>Delivery: ${escapeHtml(row[5] ?? "")} (${escapeHtml(row[4] ?? "")}) · ৳${Number(row[6] ?? 0).toFixed(0)}<br>Payment: ${escapeHtml(row[3])}</p><table><thead><tr><th>Item</th><th>Qty</th><th>Price</th></tr></thead><tbody>${itemRows}</tbody></table><p><strong>Total: ৳${Number(row[7]).toFixed(0)}</strong></p>${row[8] ? `<p>Note: ${escapeHtml(row[8])}</p>` : ""}</main><script>window.print()</script>`), { headers: { "content-type": "text/html; charset=utf-8" } });
+      return new Response(page(`Packing slip #${orderId}`, `<main id="main-content" class="print-slip"><h1>${BRAND}</h1><p>Packing slip · Order #${orderId}</p><hr><h2>${escapeHtml(row[0])}</h2><p>${escapeHtml(row[1])}<br>${escapeHtml(row[2])}</p><p>Delivery: ${escapeHtml(row[5] ?? "")} (${escapeHtml(row[4] ?? "")}) · ৳${Number(row[6] ?? 0).toFixed(0)}<br>Payment: ${escapeHtml(row[3])}${row[9] ? ` (Transaction ID ${escapeHtml(row[9])})` : ""}</p><table><thead><tr><th>Item</th><th>Qty</th><th>Price</th></tr></thead><tbody>${itemRows}</tbody></table><p><strong>Total: ৳${Number(row[7]).toFixed(0)}</strong></p>${row[8] ? `<p>Note: ${escapeHtml(row[8])}</p>` : ""}</main><script>window.print()</script>`), { headers: { "content-type": "text/html; charset=utf-8" } });
     }
 
     if (url.pathname.startsWith("/admin/orders/") && request.method === "GET") {
@@ -1858,7 +2072,7 @@ return redirect("/admin/products");
 
       const orderId = Number(url.pathname.split("/")[3]);
       const order = db.query(`
-        SELECT id, customer_name, phone, email, address, payment_method, status, total, created_at
+        SELECT id, customer_name, phone, email, address, payment_method, status, total, created_at, transaction_id
         FROM orders WHERE id = ?
       `, [orderId]);
 
@@ -1903,6 +2117,7 @@ return redirect("/admin/products");
             <p><a class="btn btn-small" target="_blank" rel="noreferrer" href="https://wa.me/${whatsappPhone}?text=${encodeURIComponent(`Hello ${row[1]}, regarding your ${BRAND} order #${orderId}.`)}">Message on WhatsApp</a></p>
             <hr>
             <p>Payment: <strong>${escapeHtml(row[5])}</strong></p>
+            ${row[9] ? `<p>Transaction ID: <strong>${escapeHtml(row[9])}</strong> <small class="muted">Check it in your ${escapeHtml(row[5])} account before confirming.</small></p>` : ""}
             <p>Delivery: <strong>${escapeHtml(delivery?.[0] ?? "Not recorded")}</strong></p>
             <p>District / city: <strong>${escapeHtml(delivery?.[1] ?? "Not recorded")}</strong></p>
             <p>Delivery charge: <strong>৳${Number(delivery?.[3] ?? 0).toFixed(0)}</strong></p>
@@ -1946,6 +2161,6 @@ return redirect("/admin/products");
         <div class="empty-links"><a class="btn btn-dark" href="/">Go to the homepage</a></div>
       </main>`, { noindex: true }), 500);
   }
-});
+}
 
 console.log(`${BRAND} running at http://localhost:${PORT}`);

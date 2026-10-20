@@ -109,6 +109,20 @@ const schema = [
     event_type TEXT NOT NULL,
     product_id INTEGER,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  // Shopping bags and admin logins live here rather than in memory, so a restart
+  // or redeploy doesn't empty customers' bags or sign the admin out.
+  `CREATE TABLE IF NOT EXISTS carts (
+    id TEXT PRIMARY KEY,
+    items TEXT NOT NULL DEFAULT '[]',
+    updated_at INTEGER NOT NULL
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS admin_sessions (
+    token TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    expires_at INTEGER NOT NULL
   )`
 ];
 
@@ -129,6 +143,10 @@ addColumnIfMissing("orders", "subtotal", "subtotal REAL NOT NULL DEFAULT 0");
 addColumnIfMissing("orders", "delivery_charge", "delivery_charge REAL NOT NULL DEFAULT 0");
 addColumnIfMissing("orders", "order_notes", "order_notes TEXT");
 addColumnIfMissing("order_items", "variant_id", "variant_id INTEGER");
+// Random token for the customer's order confirmation link, so order numbers can't be guessed.
+addColumnIfMissing("orders", "public_token", "public_token TEXT");
+// bKash / Nagad transaction ID the customer entered at checkout.
+addColumnIfMissing("orders", "transaction_id", "transaction_id TEXT");
 addColumnIfMissing("products", "skin_concern", "skin_concern TEXT");
 addColumnIfMissing("products", "ingredients", "ingredients TEXT");
 addColumnIfMissing("products", "how_to_use", "how_to_use TEXT");
@@ -144,5 +162,8 @@ db.exec("CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_i
 db.exec("CREATE INDEX IF NOT EXISTS idx_product_images_product ON product_images(product_id)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_product_variants_product ON product_variants(product_id)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_order_items_product ON order_items(product_id)");
+db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_public_token ON orders(public_token)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_orders_transaction ON orders(transaction_id)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_analytics_created ON analytics_events(created_at)");
 
 export default db;
