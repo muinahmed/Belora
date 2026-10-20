@@ -30,6 +30,12 @@ Credentials come from the `ADMIN_USERNAME` and `ADMIN_PASSWORD` environment vari
 | `FACEBOOK_URL`, `INSTAGRAM_URL`, `TIKTOK_URL` | Optional. Full `https://` links shown in the footer. |
 | `RETURNS_POLICY` | Optional. Text shown under "Delivery and returns" on product pages. Set this to your real policy. |
 
+## Tests
+
+    deno task test
+
+Starts the shop against an empty temporary database and checks the main flows: login lockout, uploads, filters, add to bag, buy now, bags surviving a restart, checkout stock, bKash transaction IDs, cancelling and reopening orders, order tracking, CSV download and backup.
+
 ## Dependencies
 
 Third-party code (the SQLite driver and its helpers) is kept in `vendor/` and committed (`"vendor": true` in `deno.json`). Builds therefore don't download from jsr.io, which has served the same package metadata with different byte orderings, so lockfile integrity checks failed at random. After changing a dependency, run `deno install --entrypoint main.js` and commit `vendor/` and `deno.lock`.
@@ -55,8 +61,11 @@ The storefront has three collections: Jewellery (`/collections/jewellery`), Make
 - Bag and guest checkout with Cash on Delivery, bKash or Nagad (with transaction ID when a payment number is set)
 - Sale prices and featured products, managed in admin; customers are charged the sale price
 - Server-side price, stock and order validation
-- Admin: products (search, low stock, pagination), categories, orders, packing slips, 30-day analytics, one-click database backup
-- Sitemap at `/sitemap.xml`
+- "Add to bag" keeps shoppers on the page (product page and product cards); "Buy now" goes straight to checkout
+- Sold-out products offer "Ask on WhatsApp" when `SHOP_WHATSAPP_NUMBER` is set
+- Order tracking at `/track-order` with the order number and phone
+- Admin: products (search, low stock, pagination), categories, orders (status and date filters, totals, CSV download for Excel), packing slips, 30-day analytics, one-click database backup
+- Sitemap at `/sitemap.xml`, `robots.txt`, and a health check at `/health` (Railway → Settings → Healthcheck Path)
 
 ## Important
 

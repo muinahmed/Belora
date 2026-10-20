@@ -1,0 +1,275 @@
+// End-to-end tests: start the shop against an empty temporary database and drive it over
+// HTTP, the way a browser and the admin would. Run with `deno task test`.
+
+const PORT = 18000 + Math.floor(Math.random() * 1000);
+const BASE = `http://localhost:${PORT}`;
+const ADMIN = { username: "admin", password: "test-password-123" };
+const PHOTO = await Deno.readFile(new URL("../public/images/collection-makeup.jpg", import.meta.url));
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function assertEquals(actual, expected, message) {
+  if (actual !== expected) throw new Error(`${message}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+}
+
+// ---------- Server ----------
+
+const dataDir = await Deno.makeTempDir({ prefix: "bellora-test-" });
+let server = null;
+
+async function startServer() {
+  server = new Deno.Command(Deno.execPath(), {
+    args: ["run", "--allow-net", "--allow-read", "--allow-write", "--allow-env", "--allow-ffi", "main.js"],
+    cwd: new URL("..", import.meta.url),
+    env: {
+      ADMIN_USERNAME: ADMIN.username,
+      ADMIN_PASSWORD: ADMIN.password,
+      DATA_DIR: dataDir,
+      PORT: String(PORT),
+      BKASH_NUMBER: "01711111111",
+      SHOP_WHATSAPP_NUMBER: "8801711111111"
+    },
+    stdout: "null",
+    stderr: "inherit"
+  }).spawn();
+  for (let attempt = 0; attempt < 120; attempt++) {
+    try {
+      const response = await fetch(`${BASE}/health`);
+      await response.body?.cancel();
+      if (response.ok) return;
+    } catch {
+      // Not listening yet.
+    }
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  throw new Error("The shop did not start");
+}
+
+async function stopServer() {
+  server?.kill("SIGTERM");
+  await server?.status;
+  server = null;
+}
+
+// ---------- A browser with its own cookies ----------
+
+function browser(address = `10.0.0.${Math.floor(Math.random() * 250) + 1}`) {
+  const cookies = new Map();
+  return {
+    cookies,
+    async request(path, { method = "GET", form = null, json = false } = {}) {
+      const headers = { "X-Forwarded-For": address };
+      if (cookies.size) headers.Cookie = [...cookies].map(([name, value]) => `${name}=${value}`).join("; ");
+      if (json) headers.Accept = "application/json";
+      let body;
+      if (form instanceof FormData) body = form;
+      else if (form) body = new URLSearchParams(form);
+      const response = await fetch(`${BASE}${path}`, { method, headers, body, redirect: "manual" });
+      for (const line of response.headers.getSetCookie()) {
+        const [pair] = line.split(";");
+        const [name, ...value] = pair.split("=");
+        if (/Max-Age=0/.test(line)) cookies.delete(name);
+        else cookies.set(name, value.join("="));
+      }
+      // Keep a leading byte order mark (the CSV download starts with one).
+      const text = new TextDecoder("utf-8", { ignoreBOM: true }).decode(await response.arrayBuffer());
+      return { status: response.status, location: response.headers.get("location"), headers: response.headers, text };
+    }
+  };
+}
+
+async function loggedInAdmin() {
+  const admin = browser();
+  const login = await admin.request("/admin/login", { method: "POST", form: ADMIN });
+  assertEquals(login.location, "/admin/dashboard", "admin login redirect");
+  return admin;
+}
+
+async function addProduct(admin, fields, { variants = "", photo = PHOTO, photoName = "photo.jpg" } = {}) {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(fields)) form.set(key, String(value));
+  if (variants) {
+    form.set("variant_name", "Shade");
+    form.set("variant_value", variants);
+  }
+  form.set("images", new File([photo], photoName, { type: "image/jpeg" }));
+  return await admin.request("/admin/products/add", { method: "POST", form });
+}
+
+function productIdByName(html, name) {
+  const pattern = new RegExp(`href="/product/(\\d+)">${name}<`);
+  const match = html.match(pattern);
+  assert(match, `product "${name}" is listed`);
+  return Number(match[1]);
+}
+
+async function stockOf(admin, productId) {
+  const page = await admin.request(`/admin/products/edit/${productId}`);
+  const match = page.text.match(/name="stock"[^>]*value="(\d+)"/) ?? page.text.match(/value="(\d+)"[^>]*name="stock"/);
+  assert(match, "stock field on the edit form");
+  return Number(match[1]);
+}
+
+const customer = (overrides = {}) => ({
+  customer_name: "Test Customer",
+  phone: "01712345678",
+  phone_confirmation: "01712345678",
+  address: "House 1, Road 2",
+  district: "Dhaka",
+  delivery_area: "Inside Dhaka",
+  payment_method: "Cash on Delivery",
+  ...overrides
+});
+
+// ---------- Tests ----------
+
+Deno.test({
+  name: "Bellora shop",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn(t) {
+    await startServer();
+    const ids = {};
+    try {
+      await t.step("pages carry security headers", async () => {
+        const home = await browser().request("/");
+        assertEquals(home.status, 200, "homepage status");
+        assertEquals(home.headers.get("x-frame-options"), "DENY", "X-Frame-Options");
+        assert(home.headers.get("content-security-policy")?.includes("frame-ancestors 'none'"), "Content-Security-Policy is set");
+      });
+
+      await t.step("admin login locks after 5 wrong passwords", async () => {
+        const attacker = browser("10.200.0.1");
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const wrong = await attacker.request("/admin/login", { method: "POST", form: { ...ADMIN, password: "wrong" } });
+          assertEquals(wrong.status, 401, `wrong password ${attempt + 1}`);
+        }
+        const locked = await attacker.request("/admin/login", { method: "POST", form: ADMIN });
+        assertEquals(locked.status, 429, "correct password while locked");
+        await loggedInAdmin();
+      });
+
+      const admin = await loggedInAdmin();
+
+      await t.step("uploads must be real photos", async () => {
+        const fake = await addProduct(admin, { name: "Fake", price: 100, stock: 1 }, { photo: new TextEncoder().encode("not an image"), photoName: "fake.jpg" });
+        assertEquals(fake.status, 400, "fake photo rejected");
+      });
+
+      await t.step("admin adds products", async () => {
+        for (const [fields, options] of [
+          [{ name: "Plain Ring", price: 1000, stock: 3 }, {}],
+          [{ name: "Bangle", price: 500, stock: 10 }, {}],
+          [{ name: "Sale Lipstick", price: 900, sale_price: 700, stock: 5 }, { variants: "Mauve Dream\nRose Petal" }],
+          [{ name: "Full Price Lipstick", price: 900, stock: 5 }, { variants: "Autumn Nude\nBoss Girl" }]
+        ]) {
+          const saved = await addProduct(admin, fields, options);
+          assertEquals(saved.location, "/admin/products", `${fields.name} saved`);
+        }
+        const list = await browser().request("/products");
+        ids.ring = productIdByName(list.text, "Plain Ring");
+        ids.bangle = productIdByName(list.text, "Bangle");
+        ids.sale = productIdByName(list.text, "Sale Lipstick");
+      });
+
+      await t.step("sale page filters list only sale products' shades", async () => {
+        const sale = await browser().request("/products?sale=1");
+        assert(sale.text.includes('value="Mauve Dream"'), "sale shade offered");
+        assert(!sale.text.includes('value="Autumn Nude"'), "full-price shade not offered");
+      });
+
+      await t.step("add to bag from a card answers with JSON and respects stock", async () => {
+        const shopper = browser();
+        const added = await shopper.request("/cart/add", { method: "POST", form: { product_id: ids.ring, quantity: 2 }, json: true });
+        const result = JSON.parse(added.text);
+        assertEquals(result.ok, true, "added");
+        assertEquals(result.count, 2, "bag count");
+        const tooMany = await shopper.request("/cart/add", { method: "POST", form: { product_id: ids.ring, quantity: 2 }, json: true });
+        assertEquals(JSON.parse(tooMany.text).ok, false, "over stock refused");
+      });
+
+      await t.step("buy now goes straight to checkout", async () => {
+        const shopper = browser();
+        const buy = await shopper.request("/cart/add", { method: "POST", form: { product_id: ids.ring, quantity: 1, next: "checkout" } });
+        assertEquals(buy.location, "/checkout", "redirect");
+      });
+
+      await t.step("bag survives a restart", async () => {
+        const shopper = browser();
+        await shopper.request("/cart/add", { method: "POST", form: { product_id: ids.ring, quantity: 1 } });
+        await stopServer();
+        await startServer();
+        const bag = await shopper.request("/cart");
+        assert(bag.text.includes("Plain Ring"), "item still in the bag");
+      });
+
+      const adminAfterRestart = await loggedInAdmin();
+
+      await t.step("checkout takes stock; order page uses a secret link", async () => {
+        const shopper = browser();
+        await shopper.request("/cart/add", { method: "POST", form: { product_id: ids.ring, quantity: 2 } });
+        const placed = await shopper.request("/checkout", { method: "POST", form: customer() });
+        assert(/^\/order-success\/[0-9a-f-]{36}$/.test(placed.location ?? ""), `redirect to token link, got ${placed.location}`);
+        const confirmation = await shopper.request(placed.location);
+        const orderId = Number(confirmation.text.match(/order number is <strong>#(\d+)/)?.[1]);
+        assert(orderId > 0, "order number shown");
+        ids.order = orderId;
+        assertEquals((await browser().request(`/order-success/${orderId}`)).status, 404, "order number alone is not a link");
+        assertEquals(await stockOf(adminAfterRestart, ids.ring), 1, "stock after order");
+      });
+
+      await t.step("bKash orders need a transaction ID, used once", async () => {
+        const order = async (transactionId) => {
+          const shopper = browser();
+          await shopper.request("/cart/add", { method: "POST", form: { product_id: ids.bangle, quantity: 1 } });
+          return await shopper.request("/checkout", { method: "POST", form: customer({ payment_method: "bKash", transaction_id: transactionId }) });
+        };
+        assertEquals((await order("")).status, 400, "missing ID refused");
+        assert((await order("9ab1cd2efg")).location?.startsWith("/order-success/"), "order with ID placed");
+        const reused = await order("9AB1CD2EFG");
+        assertEquals(reused.status, 400, "reused ID refused");
+        assert(reused.text.includes("already been used"), "reuse explained");
+        assertEquals(await stockOf(adminAfterRestart, ids.bangle), 9, "stock after bKash order");
+      });
+
+      await t.step("cancelling returns stock; reopening takes it again", async () => {
+        const setStatus = (status) => adminAfterRestart.request(`/admin/orders/${ids.order}/status`, { method: "POST", form: { status } });
+        await setStatus("Cancelled");
+        assertEquals(await stockOf(adminAfterRestart, ids.ring), 3, "stock after cancelling");
+        await setStatus("Cancelled");
+        assertEquals(await stockOf(adminAfterRestart, ids.ring), 3, "cancelling twice returns stock once");
+        await setStatus("Pending");
+        assertEquals(await stockOf(adminAfterRestart, ids.ring), 1, "stock after reopening");
+        await setStatus("Processing");
+      });
+
+      await t.step("customers track orders with number and phone", async () => {
+        const visitor = browser();
+        const found = await visitor.request("/track-order", { method: "POST", form: { order: String(ids.order), phone: "+880 1712-345678" } });
+        assertEquals(found.status, 200, "found");
+        assert(found.text.includes('aria-current="step"') && found.text.includes("Packing"), "shows the current step");
+        const wrong = await visitor.request("/track-order", { method: "POST", form: { order: String(ids.order), phone: "01799999999" } });
+        assertEquals(wrong.status, 404, "wrong phone");
+      });
+
+      await t.step("orders download for Excel", async () => {
+        const csv = await adminAfterRestart.request("/admin/orders/export.csv");
+        assertEquals(csv.status, 200, "status");
+        assert(csv.text.startsWith("﻿Order,Date,Status"), "UTF-8 marker and header row");
+        assert(csv.text.includes('"=""01712345678"""'), "phone keeps its leading zero");
+        assertEquals((await browser().request("/admin/orders/export.csv")).location, "/admin/login", "needs admin login");
+      });
+
+      await t.step("backup downloads a database file", async () => {
+        const backup = await adminAfterRestart.request("/admin/backup");
+        assertEquals(backup.status, 200, "status");
+        assert(backup.text.startsWith("SQLite format 3"), "is a SQLite file");
+      });
+    } finally {
+      await stopServer();
+      await Deno.remove(dataDir, { recursive: true }).catch(() => {});
+    }
+  }
+});
