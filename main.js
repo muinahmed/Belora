@@ -1063,30 +1063,41 @@ async function handleRequest(request, info) {
     }
 
     // ---------- Cart add ----------
+    // "Add to bag" from the product page script asks for JSON and stays on the page;
+    // a plain form post (no script) goes to the bag as before. "Buy now" (next=checkout)
+    // goes straight to checkout.
     if (url.pathname === "/cart/add" && request.method === "POST") {
       const form = await request.formData();
       const productId = Number(form.get("product_id"));
       const quantity = Number(form.get("quantity") || 1);
       const variantId = Number(form.get("variant_id")) || null;
+      const buyNow = form.get("next") === "checkout";
+      const wantsJson = (request.headers.get("accept") ?? "").includes("application/json");
+      const fail = (message, status = 400) => wantsJson
+        ? Response.json({ ok: false, error: message }, { status })
+        : new Response(message, { status });
 
       const product = getProduct(productId);
-      if (!product || !product.active) return new Response("Product not found", { status: 404 });
+      if (!product || !product.active) return fail("This product is no longer available.", 404);
       const selectedVariant = product.variants.find(variant => variant.id === variantId);
       if (product.variants.length && !selectedVariant) {
-        return new Response("Please choose a valid design.", { status: 400 });
+        return fail("Please choose a valid design.");
       }
       const availableStock = selectedVariant?.stock ?? product.stock;
       if (!Number.isInteger(quantity) || quantity < 1 || quantity > product.stock || quantity > availableStock) {
-        return new Response("Invalid quantity or insufficient stock", { status: 400 });
+        return fail(availableStock < 1 ? "Sorry, this is sold out." : `Sorry, only ${Math.min(product.stock, availableStock)} left.`);
       }
 
       const id = ensureCart(request);
       const cart = carts.get(id);
       const existing = cart.find(i => i.productId === productId && i.variantId === variantId);
 
-      if (existing) {
+      if (existing && buyNow) {
+        // Buying now what is already in the bag: use the chosen quantity, never add it twice.
+        existing.quantity = Math.max(existing.quantity, quantity);
+      } else if (existing) {
         if (existing.quantity + quantity > availableStock) {
-          return new Response("Not enough stock available", { status: 400 });
+          return fail(`You already have ${existing.quantity} in your bag, and only ${availableStock} ${availableStock === 1 ? "is" : "are"} available.`);
         }
         existing.quantity += quantity;
       } else {
@@ -1095,6 +1106,16 @@ async function handleRequest(request, info) {
 
       carts.set(id, cart);
       trackEvent("add_to_cart", productId);
+      if (buyNow) return cartResponse(request, redirect("/checkout"), id);
+      if (wantsJson) {
+        const count = cart.reduce((sum, item) => sum + item.quantity, 0);
+        return cartResponse(request, Response.json({
+          ok: true,
+          count,
+          name: product.name,
+          variant: selectedVariant ? `${selectedVariant.name}: ${selectedVariant.value}` : ""
+        }), id);
+      }
       return cartResponse(request, redirect("/cart"), id);
     }
 

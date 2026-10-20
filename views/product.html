@@ -25,14 +25,32 @@
             <input type="number" name="quantity" min="1" max="{{STOCK}}" value="1" required aria-label="Quantity" inputmode="numeric">
             <button type="button" data-step="1" aria-label="Increase quantity">+</button>
           </div>
-          <button class="btn btn-dark pd-add" type="submit" {{DISABLED}}>{{ADD_LABEL}}</button>
+          <button class="btn btn-ghost pd-add" type="submit" {{DISABLED}}>{{ADD_LABEL}}</button>
         </div>
+        <button class="btn btn-dark full pd-buy-now" type="submit" name="next" value="checkout" {{DISABLED}}>Buy now</button>
       </form>
 
       <div class="pd-sticky" aria-hidden="true" hidden>
-        <div class="pd-sticky-text"><span class="pd-sticky-name">{{NAME}}</span><span class="pd-sticky-price">{{STICKY_PRICE}}</span></div>
-        <button class="btn btn-dark" type="submit" form="pd-form" tabindex="-1" {{DISABLED}}>{{ADD_LABEL}}</button>
+        <span class="pd-sticky-price">{{STICKY_PRICE}}</span>
+        <button class="btn btn-ghost pd-sticky-add" type="submit" form="pd-form" tabindex="-1" {{DISABLED}}>{{ADD_LABEL}}</button>
+        <button class="btn btn-dark pd-sticky-buy" type="submit" form="pd-form" name="next" value="checkout" tabindex="-1" {{DISABLED}}>Buy now</button>
       </div>
+
+      <div class="added-panel" role="dialog" aria-labelledby="added-title" hidden>
+        <div class="added-head">
+          <span class="added-mark" aria-hidden="true">{{CHECK}}</span>
+          <div>
+            <p class="added-title" id="added-title">Added to bag</p>
+            <p class="added-item"></p>
+          </div>
+          <button class="added-close" type="button" aria-label="Close">×</button>
+        </div>
+        <div class="added-actions">
+          <a class="btn btn-dark" href="/checkout">Checkout</a>
+          <button class="btn btn-ghost added-continue" type="button">Continue shopping</button>
+        </div>
+      </div>
+      <p class="pd-form-error error-box" role="alert" hidden></p>
 
       <ul class="pd-assure">
         <li>{{CHECK}}Delivery {{INSIDE_DHAKA}} inside Dhaka, {{OUTSIDE_DHAKA}} outside Dhaka</li>
@@ -106,7 +124,8 @@
   // navigation keeps it in reach. It submits the same form, so the chosen shade and
   // quantity are used, and the browser points at a missing choice if there is one.
   const sticky = document.querySelector(".pd-sticky");
-  const stickyButton = sticky?.querySelector("button");
+  const stickyButtons = [...(sticky?.querySelectorAll("button") ?? [])];
+  const buyButton = document.querySelector(".pd-buy-now");
   const buyRow = document.querySelector(".pd-buy");
   if (sticky && buyRow && "IntersectionObserver" in window) {
     new IntersectionObserver(([entry]) => {
@@ -129,12 +148,58 @@
     if (Number(quantity.value) > stock) quantity.value = Math.max(stock, 1);
     addButton.disabled = stock < 1;
     addButton.textContent = stock < 1 ? "This option is sold out" : addLabel;
-    if (stickyButton) {
-      stickyButton.disabled = stock < 1;
-      stickyButton.textContent = stock < 1 ? "Sold out" : addLabel;
-    }
+    stickyButtons.forEach((button) => { button.disabled = stock < 1; });
+    if (buyButton) buyButton.disabled = stock < 1;
   }
   variantInputs.forEach((input) => input.addEventListener("change", syncVariant));
+
+  // "Add to bag" stays on the page: the item is added in the background, the bag count
+  // updates and a panel offers checkout. "Buy now" submits normally and opens checkout.
+  // If the request fails, the form is sent the ordinary way.
+  const form = document.querySelector("#pd-form");
+  const panel = document.querySelector(".added-panel");
+  const formError = document.querySelector(".pd-form-error");
+  const closePanel = () => { panel.hidden = true; document.body.classList.remove("has-added-panel"); };
+  const updateBagCount = (count) => {
+    const label = `Shopping bag, ${count} ${count === 1 ? "item" : "items"}`;
+    document.querySelectorAll(".bag-link").forEach((link) => {
+      let badge = link.querySelector(".bag-count");
+      if (!badge) { badge = document.createElement("b"); badge.className = "bag-count"; link.append(badge); }
+      badge.textContent = count;
+      link.setAttribute("aria-label", label);
+    });
+    const navBag = document.querySelector(".mobile-bottom-nav a[href='/cart']");
+    if (navBag?.lastChild) navBag.lastChild.textContent = `Bag (${count})`;
+  };
+  form?.addEventListener("submit", async (event) => {
+    if (event.submitter?.value === "checkout" || !window.fetch) return;
+    event.preventDefault();
+    const buttons = [addButton, ...stickyButtons.filter((button) => button.value !== "checkout")];
+    buttons.forEach((button) => { button.disabled = true; });
+    formError.hidden = true;
+    try {
+      const response = await fetch(form.action, { method: "POST", body: new FormData(form), headers: { Accept: "application/json" } });
+      const result = await response.json();
+      if (!result.ok) {
+        formError.textContent = result.error;
+        formError.hidden = false;
+        return;
+      }
+      updateBagCount(result.count);
+      panel.querySelector(".added-item").textContent = result.variant ? `${result.name} (${result.variant})` : result.name;
+      panel.hidden = false;
+      document.body.classList.add("has-added-panel");
+      panel.querySelector(".btn-dark").focus();
+    } catch {
+      form.submit();
+    } finally {
+      buttons.forEach((button) => { button.disabled = false; });
+      if (variantInputs.some((input) => input.checked)) syncVariant();
+    }
+  });
+  panel?.querySelector(".added-close").addEventListener("click", closePanel);
+  panel?.querySelector(".added-continue").addEventListener("click", closePanel);
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !panel.hidden) closePanel(); });
   if (variantInputs.some((input) => input.checked)) syncVariant();
   else showImage(mainImage?.getAttribute("src"));
 </script>
