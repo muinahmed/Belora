@@ -5,6 +5,8 @@ import db from "./database/database.js";
 export const BRAND = "Bellora BD";
 export const DELIVERY_CHARGES = { "Inside Dhaka": 70, "Outside Dhaka": 130 };
 export const PAGE_SIZE = 24;
+// International format without "+", e.g. 8801712345678. Empty when not set.
+export const SHOP_WHATSAPP_NUMBER = (Deno.env.get("SHOP_WHATSAPP_NUMBER") || "").replace(/\D/g, "");
 export const RETURNS_POLICY = Deno.env.get("RETURNS_POLICY")?.trim() ||
   "If there is a problem with your order, contact us after delivery and we will help sort it out.";
 
@@ -110,7 +112,8 @@ const IMAGE_SQL = `COALESCE(
   '')`;
 const PRICE_SQL = "(CASE WHEN p.sale_price IS NOT NULL AND p.sale_price >= 0 AND p.sale_price < p.price THEN p.sale_price ELSE p.price END)";
 const ON_SALE_SQL = "(p.sale_price IS NOT NULL AND p.sale_price >= 0 AND p.sale_price < p.price)";
-const CARD_SQL = `SELECT p.id, p.name, p.price, p.sale_price, p.stock, p.is_featured, c.name, ${IMAGE_SQL}
+const CARD_SQL = `SELECT p.id, p.name, p.price, p.sale_price, p.stock, p.is_featured, c.name, ${IMAGE_SQL},
+  (SELECT COUNT(*) FROM product_variants WHERE product_id = p.id)
   FROM products p LEFT JOIN categories c ON c.id = p.category_id`;
 
 function toCard(row) {
@@ -122,7 +125,8 @@ function toCard(row) {
     stock: Number(row[4]),
     featured: Number(row[5]) === 1,
     categoryName: row[6] ?? "",
-    image: row[7] ?? ""
+    image: row[7] ?? "",
+    hasVariants: Number(row[8]) > 0
   };
 }
 
@@ -236,6 +240,18 @@ export function shelf(kind, limit = 8, categoryIds = null) {
 
 // Same-category products first. A small category is topped up from the same collection,
 // then from the rest of the shop, so the row is never left with one or two cards.
+// Most viewed in-stock products over the last 30 days, then the newest, leaving out
+// excludeIds. Used to fill the homepage's bestseller row while there are few orders.
+export function popularProducts(limit, excludeIds = []) {
+  if (limit < 1) return [];
+  const exclude = excludeIds.length ? `AND p.id NOT IN (${inList(excludeIds)})` : "";
+  return db.query(`${CARD_SQL}
+    LEFT JOIN (SELECT product_id, COUNT(*) AS views FROM analytics_events
+               WHERE event_type = 'product_view' AND created_at >= datetime('now', '-30 days') GROUP BY product_id) v ON v.product_id = p.id
+    WHERE p.is_active = 1 AND p.stock > 0 ${exclude}
+    ORDER BY COALESCE(v.views, 0) DESC, p.is_featured DESC, p.id DESC LIMIT ?`, [...excludeIds, limit]).map(toCard);
+}
+
 export function relatedProducts(productId, categoryId, limit = 4, collectionIds = []) {
   const picked = db.query(`${CARD_SQL} WHERE p.is_active = 1 AND p.id <> ? AND (p.category_id = ? OR ? IS NULL)
     ORDER BY p.stock > 0 DESC, p.id DESC LIMIT ?`, [productId, categoryId, categoryId, limit]).map(toCard);
@@ -255,6 +271,7 @@ const icons = {
   home: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11 12 4l8 7v9h-5v-6H9v6H4z"/></svg>`,
   grid: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5"/><rect x="13.5" y="4" width="6.5" height="6.5"/><rect x="4" y="13.5" width="6.5" height="6.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5"/></svg>`,
   check: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>`,
+  plus: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`,
   chat: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 0 0-7.4 12.7L3.5 20.5l4.4-1.1A8.5 8.5 0 1 0 12 3.5z"/><path d="M8.5 10.5h7M8.5 13.5h4.5"/></svg>`
 };
 export { icons };
@@ -304,7 +321,7 @@ export function siteHeader({ active = "", cartCount = 0, query = "" } = {}) {
 }
 
 // contact: { whatsapp, phone, facebook, instagram, tiktok }, each optional. Unset ones are left out.
-export function siteFooter(contact = {}) {
+export function siteFooter(contact = {}, { scriptSrc = "" } = {}) {
   const { whatsapp = "", phone = "", facebook = "", instagram = "", tiktok = "" } = contact;
   const socials = [["Facebook", facebook], ["Instagram", instagram], ["TikTok", tiktok]].filter(([, href]) => href);
   const contactLinks = [
@@ -324,6 +341,7 @@ export function siteFooter(contact = {}) {
       ${COLLECTIONS.map(collection => `<a href="/collections/${collection.key}">${collection.title}</a>`).join("")}
       <a href="/products?sale=1">Sale</a>
       <a href="/products?sort=newest">New arrivals</a>
+      <a href="/track-order">Track your order</a>
     </nav>
     <div>
       <h2>Delivery and payment</h2>
@@ -340,7 +358,22 @@ export function siteFooter(contact = {}) {
     <a href="/admin/login">Staff login</a>
   </div>
 </footer>
-${whatsapp ? `<a class="wa-float" target="_blank" rel="noreferrer" href="https://wa.me/${whatsapp}" aria-label="Message us on WhatsApp">${icons.chat}<span>WhatsApp</span></a>` : ""}`;
+${whatsapp ? `<a class="wa-float" target="_blank" rel="noreferrer" href="https://wa.me/${whatsapp}" aria-label="Message us on WhatsApp">${icons.chat}<span>WhatsApp</span></a>` : ""}
+<div class="added-panel" role="dialog" aria-labelledby="added-title" hidden>
+  <div class="added-head">
+    <span class="added-mark" aria-hidden="true">${icons.check}</span>
+    <div>
+      <p class="added-title" id="added-title">Added to bag</p>
+      <p class="added-item"></p>
+    </div>
+    <button class="added-close" type="button" aria-label="Close">×</button>
+  </div>
+  <div class="added-actions">
+    <a class="btn btn-dark" href="/checkout">Checkout</a>
+    <button class="btn btn-ghost added-continue" type="button">Continue shopping</button>
+  </div>
+</div>
+${scriptSrc ? `<script src="${scriptSrc}"></script>` : ""}`;
 }
 
 export function productCard(product) {
@@ -356,7 +389,21 @@ export function productCard(product) {
   const stock = product.stock < 1 ? "" : product.stock <= 5
     ? `<p class="card-stock low">Only ${product.stock} left</p>`
     : `<p class="card-stock">In stock</p>`;
-  return `<article class="card">
+  // Sold out: ask on WhatsApp. Shades to choose: open the product. Otherwise add straight from the card.
+  let action = "";
+  if (product.stock < 1) {
+    action = SHOP_WHATSAPP_NUMBER
+      ? `<a class="card-action card-ask" target="_blank" rel="noreferrer" href="https://wa.me/${SHOP_WHATSAPP_NUMBER}?text=${encodeURIComponent(`Hello! Is "${product.name}" back in stock?`)}">Ask on WhatsApp</a>`
+      : "";
+  } else if (product.hasVariants) {
+    action = `<a class="card-action" href="/product/${product.id}">Choose option</a>`;
+  } else {
+    action = `<form class="card-add" method="POST" action="/cart/add">
+        <input type="hidden" name="product_id" value="${product.id}"><input type="hidden" name="quantity" value="1">
+        <button class="card-action" type="submit" aria-label="Add ${escapeHtml(product.name)} to bag">${icons.plus}Add to bag</button>
+      </form>`;
+  }
+  return `<article class="card${product.stock < 1 ? " is-soldout" : ""}">
     <a class="card-media" href="/product/${product.id}" tabindex="-1" aria-hidden="true">${image}${tag}</a>
     <div class="card-body">
       ${product.categoryName ? `<p class="card-category">${escapeHtml(product.categoryName)}</p>` : ""}
@@ -364,6 +411,7 @@ export function productCard(product) {
       <p class="card-price"><span${onSale ? ` class="price-sale"` : ""}>${taka(now)}</span>${onSale ? ` <s>${taka(product.price)}</s>` : ""}</p>
       ${stock}
     </div>
+    ${action}
   </article>`;
 }
 

@@ -3,7 +3,7 @@ import {
   BRAND, COLLECTIONS, DELIVERY_CHARGES, PAGE_SIZE, RETURNS_POLICY, SORTS, breadcrumbs, categoryById, categoryScope,
   categoriesWithCounts, collectionMap, countActive, effectivePrice, escapeHtml,
   getCollection, icons, listProducts, listingFacets, pagination, productGrid, relatedProducts,
-  displayName, shelf, shelfSection, siteFooter, siteHeader, taka
+  displayName, popularProducts, shelf, shelfSection, siteFooter, siteHeader, taka, SHOP_WHATSAPP_NUMBER
 } from "./storefront.js";
 
 const publicDir = "./public";
@@ -13,7 +13,6 @@ const PORT = Number(Deno.env.get("PORT") || 8000);
 
 const ADMIN_USERNAME = Deno.env.get("ADMIN_USERNAME")?.trim();
 const ADMIN_PASSWORD = Deno.env.get("ADMIN_PASSWORD");
-const SHOP_WHATSAPP_NUMBER = (Deno.env.get("SHOP_WHATSAPP_NUMBER") || "").replace(/\D/g, "");
 // Footer contact details. Social links must be full https:// addresses; anything else is ignored.
 const socialLink = (name) => {
   const value = (Deno.env.get(name) || "").trim();
@@ -39,6 +38,46 @@ if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
 }
 
 const ORDER_STATUSES = ["Pending", "Confirmed", "Processing", "Out for Delivery", "Delivered", "Cancelled"];
+// Admin order list date filters. Days are counted in Bangladesh time (UTC+6); the
+// database stores UTC.
+const ORDER_RANGES = [
+  ["", "Any time"],
+  ["today", "Today", "date(created_at, '+6 hours') = date('now', '+6 hours')"],
+  ["7d", "Last 7 days", "created_at >= datetime('now', '-7 days')"],
+  ["30d", "Last 30 days", "created_at >= datetime('now', '-30 days')"],
+  ["month", "This month", "strftime('%Y-%m', created_at, '+6 hours') = strftime('%Y-%m', 'now', '+6 hours')"]
+];
+
+// Reads the admin order filters (status, search, date range) shared by the order list
+// and its CSV download. Unknown values are ignored.
+function orderFilters(searchParams) {
+  const state = {
+    status: ORDER_STATUSES.includes(searchParams.get("status")) ? searchParams.get("status") : "",
+    range: ORDER_RANGES.some(([key]) => key && key === searchParams.get("range")) ? searchParams.get("range") : "",
+    q: searchParams.get("q")?.trim() ?? ""
+  };
+  const conditions = [];
+  const params = [];
+  if (state.status) { conditions.push("status = ?"); params.push(state.status); }
+  if (state.range) conditions.push(ORDER_RANGES.find(([key]) => key === state.range)[2]);
+  if (state.q) {
+    conditions.push("(CAST(id AS TEXT) LIKE ? OR customer_name LIKE ? OR phone LIKE ? OR transaction_id LIKE ?)");
+    params.push(`%${state.q}%`, `%${state.q}%`, `%${state.q}%`, `%${state.q}%`);
+  }
+  return { state, where: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "", params };
+}
+
+// One CSV cell. Text that Excel would run as a formula (=, +, -, @) is prefixed with an
+// apostrophe. Phone numbers are written as ="017..." so Excel keeps the leading zero.
+function csvCell(value) {
+  if (value && typeof value === "object" && "phone" in value) {
+    return /^\d+$/.test(String(value.phone)) ? `"=""${value.phone}"""` : csvCell(value.phone);
+  }
+  if (value === null || value === undefined) return "";
+  let text = String(value);
+  if (typeof value !== "number" && /^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  return /[",\r\n]/.test(text) || text !== text.trim() ? `"${text.replaceAll('"', '""')}"` : text;
+}
 const DISTRICTS = ["Bagerhat", "Bandarban", "Barguna", "Barishal", "Bhola", "Bogura", "Brahmanbaria", "Chandpur", "Chapainawabganj", "Chattogram", "Chuadanga", "Cumilla", "Cox's Bazar", "Dhaka", "Dinajpur", "Faridpur", "Feni", "Gaibandha", "Gazipur", "Gopalganj", "Habiganj", "Jamalpur", "Jashore", "Jhalokathi", "Jhenaidah", "Joypurhat", "Khagrachhari", "Khulna", "Kishoreganj", "Kurigram", "Kushtia", "Lakshmipur", "Lalmonirhat", "Madaripur", "Magura", "Manikganj", "Meherpur", "Moulvibazar", "Munshiganj", "Mymensingh", "Naogaon", "Narail", "Narayanganj", "Narsingdi", "Natore", "Netrokona", "Nilphamari", "Noakhali", "Pabna", "Panchagarh", "Patuakhali", "Pirojpur", "Rajbari", "Rajshahi", "Rangamati", "Rangpur", "Satkhira", "Shariatpur", "Sherpur", "Sirajganj", "Sunamganj", "Sylhet", "Tangail", "Thakurgaon"];
 
 function slugify(value = "") {
@@ -67,6 +106,9 @@ function page(title, content, options = {}) {
   <meta property="og:title" content="${escapeHtml(title)} — ${BRAND}">
   <meta property="og:description" content="${escapeHtml(description)}">
   <meta property="og:image" content="${escapeHtml(absolute(image))}">
+  ${options.canonical && PUBLIC_BASE_URL ? `<meta property="og:url" content="${escapeHtml(absolute(options.canonical))}">` : ""}
+  <meta name="twitter:card" content="summary_large_image">
+  ${(options.meta ?? []).map(([property, content]) => `<meta property="${escapeHtml(property)}" content="${escapeHtml(content)}">`).join("\n  ")}
   <meta name="theme-color" content="#FBF7F1">
   <link rel="icon" href="/images/bellora-icon.png" type="image/png">
   <link rel="apple-touch-icon" href="/images/bellora-icon.png">
@@ -224,7 +266,7 @@ function storeHeader(request, active = "", query = "") {
 }
 
 function storeFooter() {
-  return siteFooter(SHOP_CONTACT);
+  return siteFooter(SHOP_CONTACT, { scriptSrc: `/js/store.js?v=${STORE_SCRIPT_VERSION}` });
 }
 
 function html(body, status = 200) {
@@ -564,6 +606,65 @@ function recordCheckout(ip) {
   checkoutLog.set(ip, [...recentCheckouts(ip), Date.now()]);
 }
 
+// Order tracking needs the order number and the phone it was placed with. Failed lookups
+// are limited per address so phone numbers can't be guessed for an order number.
+const TRACK_FAILURE_LIMIT = 10;
+const TRACK_WINDOW_MS = 60 * 60 * 1000;
+const trackFailures = new Map();
+
+function recentTrackFailures(ip) {
+  const cutoff = Date.now() - TRACK_WINDOW_MS;
+  const recent = (trackFailures.get(ip) ?? []).filter(time => time > cutoff);
+  if (recent.length) trackFailures.set(ip, recent);
+  else trackFailures.delete(ip);
+  return recent;
+}
+
+// Customer-facing names for each order status, in delivery order.
+const TRACKING_STEPS = [
+  ["Pending", "Order received"],
+  ["Confirmed", "Confirmed"],
+  ["Processing", "Packing"],
+  ["Out for Delivery", "Out for delivery"],
+  ["Delivered", "Delivered"]
+];
+
+function trackingPage(request, { values = {}, error = "", order = null, status = 200 } = {}) {
+  let result = "";
+  if (order) {
+    const current = TRACKING_STEPS.findIndex(([status]) => status === order.status);
+    const steps = order.status === "Cancelled"
+      ? `<p class="track-cancelled">This order was cancelled. If you didn't expect this, please contact us.</p>`
+      : `<ol class="track-steps">${TRACKING_STEPS.map(([, label], index) =>
+          `<li class="${index < current ? "is-done" : index === current ? "is-current" : ""}"${index === current ? ` aria-current="step"` : ""}><span class="track-dot" aria-hidden="true">${index <= current ? icons.check : ""}</span>${label}</li>`
+        ).join("")}</ol>`;
+    result = `<section class="track-result" aria-labelledby="track-result-title">
+      <h2 id="track-result-title">Order #${order.id}</h2>
+      <p class="muted">Placed ${escapeHtml(order.placed)} · ${escapeHtml(order.district || "")}</p>
+      ${steps}
+      <ul class="track-items">${order.items.map(([name, quantity]) => `<li><span>${escapeHtml(name)}</span><b>× ${quantity}</b></li>`).join("")}</ul>
+      <dl class="summary-lines">
+        <div><dt>Payment</dt><dd>${escapeHtml(order.payment)}</dd></div>
+        <div class="summary-total"><dt>Total</dt><dd>${taka(order.total)}</dd></div>
+      </dl>
+      ${SHOP_WHATSAPP_NUMBER ? `<a class="btn btn-ghost" target="_blank" rel="noreferrer" href="https://wa.me/${SHOP_WHATSAPP_NUMBER}?text=${encodeURIComponent(`Hello! I'm asking about ${BRAND} order #${order.id}.`)}">Ask about this order on WhatsApp</a>` : ""}
+    </section>`;
+  }
+  return html(page("Track your order", `${storeHeader(request)}
+    <main id="main-content" class="wrap track-page">
+      ${breadcrumbs([["Home", "/"], ["Track your order", ""]])}
+      <h1>Track your order</h1>
+      <p class="listing-intro">Enter your order number and the phone number you ordered with.</p>
+      ${error ? `<p class="error-box" role="alert">${escapeHtml(error)}</p>` : ""}
+      <form class="track-form" method="POST" action="/track-order">
+        <label>Order number<input name="order" inputmode="numeric" autocomplete="off" placeholder="For example 1024" maxlength="12" value="${escapeHtml(values.order ?? "")}" required></label>
+        <label>Phone<input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="01XXXXXXXXX" maxlength="20" value="${escapeHtml(values.phone ?? "")}" required></label>
+        <button class="btn btn-dark" type="submit">Track order</button>
+      </form>
+      ${result}
+    </main>${storeFooter()}`, { noindex: true }), status);
+}
+
 async function renderCheckout(request, details, { error = "", values = {}, status = 200 } = {}) {
   const items = details.map(item => `
     <li>
@@ -611,13 +712,16 @@ async function renderCheckout(request, details, { error = "", values = {}, statu
   }), { noindex: true }), status);
 }
 
-// The stylesheet is read once. Its link carries a content hash, so browsers can keep it
-// for a year and still fetch the new file straight after a deploy changes it.
+// The stylesheet and storefront script are read once. Their links carry a content hash, so
+// browsers can keep them for a year and still fetch the new file straight after a deploy.
+async function contentVersion(text) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest).slice(0, 6), byte => byte.toString(16).padStart(2, "0")).join("");
+}
 const STYLESHEET = await Deno.readTextFile(`${publicDir}/css/style.css`);
-const STYLESHEET_VERSION = Array.from(
-  new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(STYLESHEET))).slice(0, 6),
-  byte => byte.toString(16).padStart(2, "0")
-).join("");
+const STYLESHEET_VERSION = await contentVersion(STYLESHEET);
+const STORE_SCRIPT = await Deno.readTextFile(`${publicDir}/js/store.js`);
+const STORE_SCRIPT_VERSION = await contentVersion(STORE_SCRIPT);
 
 // Inline scripts and styles are part of the pages, so they stay allowed; everything else
 // must come from this site or Google Fonts, and no other site may frame these pages.
@@ -667,6 +771,16 @@ async function handleRequest(request, info) {
       });
     }
 
+    if (url.pathname === "/js/store.js") {
+      const versioned = url.searchParams.get("v") === STORE_SCRIPT_VERSION;
+      return new Response(STORE_SCRIPT, {
+        headers: {
+          "content-type": "text/javascript; charset=utf-8",
+          "cache-control": versioned ? "public, max-age=31536000, immutable" : "public, max-age=300"
+        }
+      });
+    }
+
     if (url.pathname.startsWith("/images/")) {
       const safePath = url.pathname.replaceAll("..", "");
       try {
@@ -697,6 +811,32 @@ async function handleRequest(request, info) {
       const urls = [`${base}/`, `${base}/products`, ...COLLECTIONS.map(collection => `${base}/collections/${collection.key}`), ...products.map(([id]) => `${base}/product/${id}`)];
       const xml = `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.map(entry => `<url><loc>${escapeHtml(entry)}</loc></url>`).join("")}</urlset>`;
       return new Response(xml, { headers: { "content-type": "application/xml; charset=utf-8" } });
+    }
+
+    if (url.pathname === "/robots.txt" && request.method === "GET") {
+      const base = PUBLIC_BASE_URL || url.origin;
+      const body = [
+        "User-agent: *",
+        "Disallow: /admin",
+        "Disallow: /cart",
+        "Disallow: /checkout",
+        "Disallow: /order-success",
+        "Disallow: /track-order",
+        "",
+        `Sitemap: ${base}/sitemap.xml`,
+        ""
+      ].join("\n");
+      return new Response(body, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=3600" } });
+    }
+
+    // For Railway's health check: the app is up and the database answers.
+    if (url.pathname === "/health" && request.method === "GET") {
+      try {
+        db.query("SELECT 1");
+        return Response.json({ ok: true }, { headers: { "cache-control": "no-store" } });
+      } catch {
+        return Response.json({ ok: false }, { status: 503, headers: { "cache-control": "no-store" } });
+      }
     }
 
     // ---------- Home ----------
@@ -740,6 +880,13 @@ async function handleRequest(request, info) {
           : ["Clear stock levels", "Every product shows what is left before you order."]
       ].map(([title, text]) => `<div><h3>${title}</h3><p>${text}</p></div>`).join("");
 
+      // A full row of real bestsellers is titled as such. With fewer, the row is topped up
+      // with the most viewed products and called "Popular right now", so it is never half empty.
+      const bestsellers = shelf("bestsellers", 4);
+      const bestsellersSection = bestsellers.length >= 4
+        ? shelfSection("Bestsellers", bestsellers, "", "")
+        : shelfSection("Popular right now", [...bestsellers, ...popularProducts(4 - bestsellers.length, bestsellers.map(product => product.id))], "", "");
+
       const view = await readView("home.html");
       return html(page("Jewellery, makeup and skincare", fill(view, {
         HEADER: storeHeader(request, "home"),
@@ -747,7 +894,7 @@ async function handleRequest(request, info) {
         COLLECTION_TILES: tiles,
         NEW_ARRIVALS: shelfSection("New arrivals", newArrivals, "/products?sort=newest", "View all"),
         SALE_BANNER: saleBanner,
-        BESTSELLERS: shelfSection("Bestsellers", shelf("bestsellers", 4), "", ""),
+        BESTSELLERS: bestsellersSection,
         FEATURED: shelfSection("Our picks", shelf("featured", 4), "/products?sort=featured", "View all", "shelf-soft"),
         ASSURANCE: assurance
       }), { canonical: "/" }));
@@ -1047,6 +1194,9 @@ async function handleRequest(request, info) {
         STOCK: String(Math.max(product.stock, 1)),
         DISABLED: purchasable ? "" : "disabled",
         ADD_LABEL: purchasable ? "Add to bag" : "Sold out",
+        SOLD_OUT_ASK: !purchasable && SHOP_WHATSAPP_NUMBER
+          ? `<a class="btn btn-ghost full pd-ask" target="_blank" rel="noreferrer" href="https://wa.me/${SHOP_WHATSAPP_NUMBER}?text=${encodeURIComponent(`Hello! Is "${product.name}" back in stock?`)}">Ask on WhatsApp when it's back</a>`
+          : "",
         CHECK: icons.check,
         INSIDE_DHAKA: taka(DELIVERY_CHARGES["Inside Dhaka"]),
         OUTSIDE_DHAKA: taka(DELIVERY_CHARGES["Outside Dhaka"]),
@@ -1058,7 +1208,13 @@ async function handleRequest(request, info) {
         description: (product.description || `${product.name} at ${BRAND}.`).replace(/\s+/g, " ").slice(0, 155),
         image: mainImage || undefined,
         canonical: `/product/${product.id}`,
-        ogType: "product"
+        ogType: "product",
+        // Facebook and WhatsApp show these with the link preview.
+        meta: [
+          ["product:price:amount", product.unitPrice.toFixed(2)],
+          ["product:price:currency", "BDT"],
+          ["product:availability", product.stock > 0 ? "in stock" : "out of stock"]
+        ]
       }));
     }
 
@@ -1373,7 +1529,7 @@ async function handleRequest(request, info) {
           <div class="success-card">
             <span class="success-mark" aria-hidden="true">${icons.check}</span>
             <h1>Thank you, your order is placed</h1>
-            <p>Your order number is <strong>#${orderId}</strong>. Keep it handy if you contact us about delivery.</p>
+            <p>Your order number is <strong>#${orderId}</strong>. Keep it handy if you contact us about delivery. You can <a class="text-link" href="/track-order">track your order</a> any time with this number and your phone.</p>
             <dl class="summary-lines">
               <div><dt>Payment</dt><dd>${escapeHtml(row[0][2])}</dd></div>
               ${row[0][4] ? `<div><dt>Transaction ID</dt><dd>${escapeHtml(row[0][4])}</dd></div>` : ""}
@@ -1385,6 +1541,34 @@ async function handleRequest(request, info) {
             </div>
           </div>
         </main>${storeFooter()}`, { noindex: true }));
+    }
+
+    // ---------- Order tracking ----------
+    if (url.pathname === "/track-order" && request.method === "GET") {
+      return trackingPage(request);
+    }
+
+    if (url.pathname === "/track-order" && request.method === "POST") {
+      const form = await request.formData();
+      const values = { order: form.get("order")?.toString().trim() ?? "", phone: form.get("phone")?.toString().trim() ?? "" };
+      const clientIp = clientAddress(request, info);
+      if (recentTrackFailures(clientIp).length >= TRACK_FAILURE_LIMIT) {
+        return trackingPage(request, { values, error: "Too many attempts. Please wait an hour, or contact us and we'll check your order for you.", status: 429 });
+      }
+      const orderId = Number(values.order.replace(/^#/, ""));
+      const phone = normalizeBdPhone(values.phone);
+      const row = Number.isInteger(orderId) && orderId > 0 && phone
+        ? db.query("SELECT id, status, datetime(created_at, '+6 hours'), district, payment_method, total FROM orders WHERE id = ? AND phone = ?", [orderId, phone])[0]
+        : null;
+      if (!row) {
+        trackFailures.set(clientIp, [...recentTrackFailures(clientIp), Date.now()]);
+        return trackingPage(request, { values, error: "We couldn't find an order with that number and phone. Please check both and try again.", status: 404 });
+      }
+      const items = db.query("SELECT product_name, quantity FROM order_items WHERE order_id = ? ORDER BY id", [row[0]]);
+      return trackingPage(request, {
+        values,
+        order: { id: row[0], status: row[1], placed: String(row[2]).slice(0, 16), district: row[3], payment: row[4], total: row[5], items }
+      });
     }
 
     // ---------- Admin login ----------
@@ -1927,19 +2111,12 @@ return redirect("/admin/products");
       const denied = adminGuard(request);
       if (denied) return denied;
 
-      const status = url.searchParams.get("status") ?? "";
-      const orderSearch = url.searchParams.get("q")?.trim() ?? "";
-      const orderWhere = [];
-      const orderParams = [];
-      if (status) { orderWhere.push("status = ?"); orderParams.push(status); }
-      if (orderSearch) {
-        orderWhere.push("(CAST(id AS TEXT) LIKE ? OR customer_name LIKE ? OR phone LIKE ? OR transaction_id LIKE ?)");
-        orderParams.push(`%${orderSearch}%`, `%${orderSearch}%`, `%${orderSearch}%`, `%${orderSearch}%`);
-      }
+      const { state, where, params: orderParams } = orderFilters(url.searchParams);
       const rows = db.query(`
-        SELECT id, customer_name, phone, payment_method, status, total, created_at, transaction_id
-        FROM orders ${orderWhere.length ? `WHERE ${orderWhere.join(" AND ")}` : ""} ORDER BY id DESC
+        SELECT id, customer_name, phone, payment_method, status, total, datetime(created_at, '+6 hours'), transaction_id
+        FROM orders ${where} ORDER BY id DESC
       `, orderParams);
+      const totals = db.query(`SELECT COUNT(*), COALESCE(SUM(total), 0) FROM orders ${where ? `${where} AND` : "WHERE"} status <> 'Cancelled'`, orderParams)[0];
 
       const orderRows = rows.map(row => `
         <tr>
@@ -1948,19 +2125,34 @@ return redirect("/admin/products");
           <td data-label="Payment">${escapeHtml(row[3])}${row[7] ? `<br><small>${escapeHtml(row[7])}</small>` : ""}</td>
           <td data-label="Status"><span class="status">${escapeHtml(row[4])}</span></td>
           <td data-label="Total">৳${Number(row[5]).toFixed(0)}</td>
-          <td data-label="Date">${escapeHtml(row[6])}</td>
+          <td data-label="Date">${escapeHtml(String(row[6]).slice(0, 16))}</td>
           <td class="cell-actions" data-label=""><a class="btn btn-small" href="/admin/orders/${row[0]}">View</a></td>
         </tr>
       `).join("");
 
-      const filter = ORDER_STATUSES.map(s =>
-        `<a class="${status === s ? "active-filter" : ""}" href="/admin/orders?status=${encodeURIComponent(s)}${orderSearch ? `&q=${encodeURIComponent(orderSearch)}` : ""}">${s}</a>`
+      const hrefWith = (changes) => {
+        const query = new URLSearchParams(Object.entries({ ...state, ...changes }).filter(([, value]) => value));
+        const text = query.toString();
+        return text ? `/admin/orders?${text}` : "/admin/orders";
+      };
+      const filterLinks = (key, options) => options.map(([value, label]) =>
+        `<a class="${state[key] === value ? "active-filter" : ""}" href="${hrefWith({ [key]: value })}">${label}</a>`
       ).join(" ");
+      const exportQuery = new URLSearchParams(Object.entries(state).filter(([, value]) => value)).toString();
 
       const content = `
-        <div class="page-title"><p class="eyebrow">Sales</p><h1>Orders</h1></div>
-        <form class="search-bar" method="GET" action="/admin/orders"><input name="q" value="${escapeHtml(orderSearch)}" placeholder="Search order number, customer, phone or transaction ID"><button class="btn" type="submit">Search</button></form>
-        <div class="filters"><a href="/admin/orders">All</a>${filter}</div>
+        <div class="page-title page-title-row">
+          <div><p class="eyebrow">Sales</p><h1>Orders</h1></div>
+          <a class="btn btn-light" href="/admin/orders/export.csv${exportQuery ? `?${exportQuery}` : ""}">Download for Excel (CSV)</a>
+        </div>
+        <form class="search-bar" method="GET" action="/admin/orders">
+          ${state.status ? `<input type="hidden" name="status" value="${escapeHtml(state.status)}">` : ""}
+          ${state.range ? `<input type="hidden" name="range" value="${escapeHtml(state.range)}">` : ""}
+          <input name="q" value="${escapeHtml(state.q)}" placeholder="Search order number, customer, phone or transaction ID"><button class="btn" type="submit">Search</button>
+        </form>
+        <div class="filters"><span class="filter-label">Status</span>${filterLinks("status", [["", "All"], ...ORDER_STATUSES.map(status => [status, status])])}</div>
+        <div class="filters"><span class="filter-label">Date</span>${filterLinks("range", ORDER_RANGES.map(([key, label]) => [key, label]))}</div>
+        <p class="orders-summary">${rows.length} ${rows.length === 1 ? "order" : "orders"} shown · <strong>${Number(totals[0])} not cancelled, ${taka(totals[1])}</strong></p>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Order</th><th>Customer</th><th>Payment</th><th>Status</th><th>Total</th><th>Date</th><th></th></tr></thead>
@@ -1970,6 +2162,41 @@ return redirect("/admin/products");
 
       return new Response(adminPage("Orders", content), {
         headers: { "content-type": "text/html; charset=utf-8" }
+      });
+    }
+
+    // The orders currently filtered in the admin list, one row per order, for Excel.
+    if (url.pathname === "/admin/orders/export.csv" && request.method === "GET") {
+      const denied = adminGuard(request);
+      if (denied) return denied;
+
+      const { where, params: orderParams } = orderFilters(url.searchParams);
+      const orders = db.query(`
+        SELECT id, datetime(created_at, '+6 hours'), status, customer_name, phone, email, address, district, delivery_area,
+               payment_method, transaction_id, subtotal, delivery_charge, total, order_notes
+        FROM orders ${where} ORDER BY id DESC
+      `, orderParams);
+      const itemsByOrder = new Map();
+      if (orders.length) {
+        const ids = orders.map(order => order[0]);
+        for (const [orderId, name, quantity] of db.query(`SELECT order_id, product_name, quantity FROM order_items WHERE order_id IN (${ids.map(() => "?").join(", ")}) ORDER BY id`, ids)) {
+          itemsByOrder.set(orderId, [...(itemsByOrder.get(orderId) ?? []), `${name} x${quantity}`]);
+        }
+      }
+      const header = ["Order", "Date", "Status", "Customer", "Phone", "Email", "Address", "District", "Delivery area", "Payment", "Transaction ID", "Items", "Subtotal", "Delivery", "Total", "Note"];
+      const lines = orders.map(order => [
+        order[0], String(order[1]).slice(0, 16), order[2], order[3], { phone: order[4] }, order[5], order[6], order[7], order[8],
+        order[9], order[10], (itemsByOrder.get(order[0]) ?? []).join("; "), order[11], order[12], order[13], order[14]
+      ]);
+      const csv = [header, ...lines].map(cells => cells.map(csvCell).join(",")).join("\r\n");
+      const date = new Date().toISOString().slice(0, 10);
+      // The byte order mark tells Excel the file is UTF-8, so Bangla text displays correctly.
+      return new Response(`\uFEFF${csv}\r\n`, {
+        headers: {
+          "content-type": "text/csv; charset=utf-8",
+          "content-disposition": `attachment; filename="bellora-orders-${date}.csv"`,
+          "cache-control": "no-store"
+        }
       });
     }
 
@@ -2099,7 +2326,7 @@ return redirect("/admin/products");
 
       const orderId = Number(url.pathname.split("/")[3]);
       const order = db.query(`
-        SELECT id, customer_name, phone, email, address, payment_method, status, total, created_at, transaction_id
+        SELECT id, customer_name, phone, email, address, payment_method, status, total, datetime(created_at, '+6 hours'), transaction_id
         FROM orders WHERE id = ?
       `, [orderId]);
 
