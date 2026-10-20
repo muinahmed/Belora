@@ -224,9 +224,17 @@ export function shelf(kind, limit = 8, categoryIds = null) {
   return db.query(`${CARD_SQL} WHERE p.is_active = 1 ${where} ${scope} ORDER BY p.id DESC LIMIT ?`, [...params, limit]).map(toCard);
 }
 
-export function relatedProducts(productId, categoryId, limit = 4) {
-  return db.query(`${CARD_SQL} WHERE p.is_active = 1 AND p.id <> ? AND (p.category_id = ? OR ? IS NULL)
+// Same-category products first. A small category is topped up from the same collection,
+// then from the rest of the shop, so the row is never left with one or two cards.
+export function relatedProducts(productId, categoryId, limit = 4, collectionIds = []) {
+  const picked = db.query(`${CARD_SQL} WHERE p.is_active = 1 AND p.id <> ? AND (p.category_id = ? OR ? IS NULL)
     ORDER BY p.stock > 0 DESC, p.id DESC LIMIT ?`, [productId, categoryId, categoryId, limit]).map(toCard);
+  if (picked.length >= limit) return picked;
+  const exclude = [productId, ...picked.map(product => product.id)];
+  const sameCollection = collectionIds.length ? `p.category_id IN (${inList(collectionIds)})` : "0";
+  const extra = db.query(`${CARD_SQL} WHERE p.is_active = 1 AND p.id NOT IN (${inList(exclude)})
+    ORDER BY ${sameCollection} DESC, p.stock > 0 DESC, p.id DESC LIMIT ?`, [...exclude, ...collectionIds, limit - picked.length]).map(toCard);
+  return [...picked, ...extra];
 }
 
 // ---------- Markup ----------
@@ -236,7 +244,8 @@ const icons = {
   bag: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14l-1.2 12H6.2z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/></svg>`,
   home: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11 12 4l8 7v9h-5v-6H9v6H4z"/></svg>`,
   grid: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5"/><rect x="13.5" y="4" width="6.5" height="6.5"/><rect x="4" y="13.5" width="6.5" height="6.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5"/></svg>`,
-  check: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>`
+  check: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>`,
+  chat: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 0 0-7.4 12.7L3.5 20.5l4.4-1.1A8.5 8.5 0 1 0 12 3.5z"/><path d="M8.5 10.5h7M8.5 13.5h4.5"/></svg>`
 };
 export { icons };
 
@@ -284,10 +293,18 @@ export function siteHeader({ active = "", cartCount = 0, query = "" } = {}) {
 </nav>`;
 }
 
-export function siteFooter(whatsappNumber = "") {
+// contact: { whatsapp, phone, facebook, instagram, tiktok }, each optional. Unset ones are left out.
+export function siteFooter(contact = {}) {
+  const { whatsapp = "", phone = "", facebook = "", instagram = "", tiktok = "" } = contact;
+  const socials = [["Facebook", facebook], ["Instagram", instagram], ["TikTok", tiktok]].filter(([, href]) => href);
+  const contactLinks = [
+    phone ? `<a href="tel:${escapeHtml(phone)}">Call ${escapeHtml(phone)}</a>` : "",
+    whatsapp ? `<a target="_blank" rel="noreferrer" href="https://wa.me/${whatsapp}">WhatsApp us</a>` : "",
+    ...socials.map(([label, href]) => `<a target="_blank" rel="noreferrer" href="${escapeHtml(href)}">${label}</a>`)
+  ].filter(Boolean);
   return `
 <footer class="site-footer">
-  <div class="wrap footer-grid">
+  <div class="wrap footer-grid${contactLinks.length ? " has-contact" : ""}">
     <div class="footer-brand">
       ${wordmark()}
       <p>Jewellery, makeup and skincare, chosen piece by piece and delivered across Bangladesh.</p>
@@ -302,14 +319,18 @@ export function siteFooter(whatsappNumber = "") {
       <h2>Delivery and payment</h2>
       <p>${taka(DELIVERY_CHARGES["Inside Dhaka"])} delivery inside Dhaka, ${taka(DELIVERY_CHARGES["Outside Dhaka"])} everywhere else in Bangladesh.</p>
       <p>Pay with cash on delivery, bKash or Nagad.</p>
-      ${whatsappNumber ? `<p><a class="text-link" target="_blank" rel="noreferrer" href="https://wa.me/${whatsappNumber}">Message us on WhatsApp</a></p>` : ""}
     </div>
+    ${contactLinks.length ? `<nav aria-label="Contact us">
+      <h2>Contact us</h2>
+      ${contactLinks.join("")}
+    </nav>` : ""}
   </div>
   <div class="wrap footer-base">
     <p>© ${new Date().getFullYear()} ${BRAND}</p>
     <a href="/admin/login">Staff login</a>
   </div>
-</footer>`;
+</footer>
+${whatsapp ? `<a class="wa-float" target="_blank" rel="noreferrer" href="https://wa.me/${whatsapp}" aria-label="Message us on WhatsApp">${icons.chat}<span>WhatsApp</span></a>` : ""}`;
 }
 
 export function productCard(product) {

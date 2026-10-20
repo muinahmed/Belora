@@ -39,6 +39,8 @@
           <label class="choice"><input type="radio" name="payment_method" value="bKash" {{BKASH_CHECKED}}><span><b>bKash</b><small>Mobile payment</small></span></label>
           <label class="choice"><input type="radio" name="payment_method" value="Nagad" {{NAGAD_CHECKED}}><span><b>Nagad</b><small>Mobile payment</small></span></label>
         </div>
+        {{PAYMENT_STEPS}}
+        <label class="transaction-field" {{TRANSACTION_HIDDEN}}>Transaction ID<input name="transaction_id" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="30" placeholder="For example 9AB1CD2EFG" value="{{TRANSACTION_ID}}"></label>
       </fieldset>
 
       <button class="btn btn-dark full" type="submit">Place order</button>
@@ -68,7 +70,26 @@
     const subtotal = Number.parseFloat(total.dataset.subtotal);
     deliveryCharge.textContent = format(charge);
     total.textContent = Number.isFinite(subtotal) ? format(subtotal + charge) : "Total unavailable";
+    document.querySelectorAll(".payment-total").forEach((element) => { element.textContent = total.textContent; });
   };
   document.querySelectorAll("input[name='delivery_area']").forEach((input) => input.addEventListener("change", updateTotal));
   updateTotal();
+
+  // bKash / Nagad: show the number to pay and ask for the transaction ID, only for a
+  // method that has a payment number set up.
+  const transactionField = document.querySelector(".transaction-field");
+  const transactionInput = transactionField?.querySelector("input");
+  const updatePayment = () => {
+    const method = document.querySelector("input[name='payment_method']:checked")?.value;
+    let needsTransaction = false;
+    document.querySelectorAll(".payment-steps").forEach((steps) => {
+      const active = steps.dataset.method === method;
+      steps.hidden = !active;
+      if (active) needsTransaction = true;
+    });
+    if (transactionField) transactionField.hidden = !needsTransaction;
+    if (transactionInput) transactionInput.required = needsTransaction;
+  };
+  document.querySelectorAll("input[name='payment_method']").forEach((input) => input.addEventListener("change", updatePayment));
+  updatePayment();
 </script>

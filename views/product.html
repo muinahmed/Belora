@@ -16,7 +16,7 @@
       <p class="pd-stock {{STOCK_CLASS}}" id="stock-text">{{STOCK_TEXT}}</p>
       {{DESCRIPTION}}
 
-      <form class="pd-form" method="POST" action="/cart/add">
+      <form class="pd-form" id="pd-form" method="POST" action="/cart/add">
         <input type="hidden" name="product_id" value="{{PRODUCT_ID}}">
         {{VARIANT}}
         <div class="pd-buy">
@@ -28,6 +28,11 @@
           <button class="btn btn-dark pd-add" type="submit" {{DISABLED}}>{{ADD_LABEL}}</button>
         </div>
       </form>
+
+      <div class="pd-sticky" aria-hidden="true" hidden>
+        <div class="pd-sticky-text"><span class="pd-sticky-name">{{NAME}}</span><span class="pd-sticky-price">{{STICKY_PRICE}}</span></div>
+        <button class="btn btn-dark" type="submit" form="pd-form" tabindex="-1" {{DISABLED}}>{{ADD_LABEL}}</button>
+      </div>
 
       <ul class="pd-assure">
         <li>{{CHECK}}Delivery {{INSIDE_DHAKA}} inside Dhaka, {{OUTSIDE_DHAKA}} outside Dhaka</li>
@@ -97,6 +102,19 @@
     });
   });
 
+  // Phones: while the main "Add to bag" button is off screen, a bar above the bottom
+  // navigation keeps it in reach. It submits the same form, so the chosen shade and
+  // quantity are used, and the browser points at a missing choice if there is one.
+  const sticky = document.querySelector(".pd-sticky");
+  const stickyButton = sticky?.querySelector("button");
+  const buyRow = document.querySelector(".pd-buy");
+  if (sticky && buyRow && "IntersectionObserver" in window) {
+    new IntersectionObserver(([entry]) => {
+      sticky.hidden = entry.isIntersecting;
+      document.body.classList.toggle("has-sticky-buy", !entry.isIntersecting);
+    }).observe(buyRow);
+  }
+
   const variantLabel = document.querySelector("#variant-choice");
   function syncVariant() {
     const selected = variantInputs.find((input) => input.checked);
@@ -111,6 +129,10 @@
     if (Number(quantity.value) > stock) quantity.value = Math.max(stock, 1);
     addButton.disabled = stock < 1;
     addButton.textContent = stock < 1 ? "This option is sold out" : addLabel;
+    if (stickyButton) {
+      stickyButton.disabled = stock < 1;
+      stickyButton.textContent = stock < 1 ? "Sold out" : addLabel;
+    }
   }
   variantInputs.forEach((input) => input.addEventListener("change", syncVariant));
   if (variantInputs.some((input) => input.checked)) syncVariant();
