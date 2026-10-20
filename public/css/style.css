@@ -870,3 +870,31 @@ td a:not(.btn):hover { text-decoration: underline; }
 .filter-more summary { list-style: none; padding: 6px 0 2px; color: var(--rust); font-size: .9rem; font-weight: 500; text-decoration: underline; text-underline-offset: 4px; cursor: pointer; }
 .filter-more summary::-webkit-details-marker { display: none; }
 .filter-more[open] summary { display: none; }
+
+/* "Buy now" under the quantity and "Add to bag" row. */
+.pd-buy-now { margin-top: -10px; }
+.pd-form-error { margin-top: 12px; }
+
+/* "Added to bag" panel: bottom right on larger screens, above the bottom navigation on phones. */
+.added-panel {
+  position: fixed; z-index: 50; right: 24px; bottom: 24px; width: min(380px, calc(100vw - 32px));
+  padding: 18px; background: var(--white); border: 1px solid var(--line); box-shadow: 0 12px 36px rgba(43, 35, 29, .18);
+  animation: rise .25s ease-out both;
+}
+.added-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: start; margin-bottom: 16px; }
+.added-mark { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--olive); color: var(--ivory); }
+.added-mark svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+.added-title { font-weight: 600; }
+.added-item { color: var(--ink-soft); font-size: .9rem; overflow-wrap: anywhere; }
+.added-close { border: 0; background: none; font-size: 1.6rem; line-height: 1; padding: 0 4px; color: var(--ink-soft); }
+.added-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.added-actions .btn { padding-inline: 12px; }
+.has-added-panel .wa-float { display: none; }
+
+@media (max-width: 620px) {
+  .pd-sticky:not([hidden]) { gap: 8px; }
+  .pd-sticky-price { flex: 1; min-width: 0; font-weight: 600; }
+  .pd-sticky .btn { min-height: 44px; padding-inline: 14px; font-size: .9rem; }
+  .pd-sticky .btn-ghost { background: var(--white); }
+  .added-panel { left: 0; right: 0; width: auto; bottom: calc(68px + env(safe-area-inset-bottom, 0px)); border-width: 1px 0 0; }
+}
