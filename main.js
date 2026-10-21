@@ -2005,7 +2005,7 @@ return redirect("/admin/products");
         FROM categories c LEFT JOIN categories p ON p.id = c.parent_id
         ORDER BY CASE WHEN c.parent_id IS NULL THEN 0 ELSE 1 END, c.name
       `);
-      const list = rows.map(([id, name, slug, description, parentId, parentName]) => `
+      const list = rows.map(([id, name, slug, description, parentId]) => `
         <tr>
           <td class="cell-title" data-label="">${escapeHtml(name)}</td>
           <td data-label="Parent">
