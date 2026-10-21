@@ -1,4 +1,5 @@
 import db from "./database/database.js";
+import { asset, imageVersion, versionImagePaths } from "./assets.js";
 import {
   BRAND, COLLECTIONS, DELIVERY_CHARGES, PAGE_SIZE, RETURNS_POLICY, SORTS, breadcrumbs, categoryById, categoryScope,
   categoriesWithCounts, collectionMap, countActive, effectivePrice, escapeHtml,
@@ -90,7 +91,7 @@ function slugify(value = "") {
 
 function page(title, content, options = {}) {
   const description = options.description || `Shop jewellery, makeup and skincare at ${BRAND}, with cash on delivery across Bangladesh.`;
-  const image = options.image || "/images/beauty-hero-banner.jpg";
+  const image = options.image || asset("/images/beauty-hero-banner.jpg");
   const absolute = (path) => PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}${path}` : path;
   return `<!doctype html>
 <html lang="en">
@@ -110,8 +111,8 @@ function page(title, content, options = {}) {
   <meta name="twitter:card" content="summary_large_image">
   ${(options.meta ?? []).map(([property, content]) => `<meta property="${escapeHtml(property)}" content="${escapeHtml(content)}">`).join("\n  ")}
   <meta name="theme-color" content="#FBF7F1">
-  <link rel="icon" href="/images/bellora-icon.png" type="image/png">
-  <link rel="apple-touch-icon" href="/images/bellora-icon.png">
+  <link rel="icon" href="${asset("/images/bellora-icon.png")}" type="image/png">
+  <link rel="apple-touch-icon" href="${asset("/images/bellora-icon.png")}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..700;1,6..96,400..600&family=Jost:wght@400;500;600&display=swap">
@@ -277,7 +278,7 @@ function adminHeader(title) {
   return `
 <header class="admin-header">
   <div>
-    <a class="wordmark" href="/admin/dashboard" aria-label="Bellora admin dashboard"><img src="/images/bellora-logo.png" alt="Bellora" width="900" height="272"></a>
+    <a class="wordmark" href="/admin/dashboard" aria-label="Bellora admin dashboard"><img src="${asset("/images/bellora-logo.png")}" alt="Bellora" width="900" height="272"></a>
     <strong>${escapeHtml(title)}</strong>
   </div>
   <nav>
@@ -430,7 +431,7 @@ function imageMime(path) {
 }
 
 async function readView(name) {
-  return await Deno.readTextFile(`./views/${name}`);
+  return versionImagePaths(await Deno.readTextFile(`./views/${name}`));
 }
 
 // Single-pass {{KEY}} substitution. A replacer function keeps "$&"-style
@@ -785,7 +786,10 @@ async function handleRequest(request, info) {
       const safePath = url.pathname.replaceAll("..", "");
       try {
         const data = await Deno.readFile(`${publicDir}${safePath}`);
-        return new Response(data, { headers: { "content-type": imageMime(safePath), "cache-control": "public, max-age=86400" } });
+        // Fingerprinted URLs never change content, so they cache for a year; bare URLs
+        // (old links, shared previews) recheck often so a replaced photo appears quickly.
+        const versioned = url.searchParams.get("v") === imageVersion(safePath);
+        return new Response(data, { headers: { "content-type": imageMime(safePath), "cache-control": versioned ? "public, max-age=31536000, immutable" : "public, max-age=300" } });
       } catch {
         return new Response("Image not found", { status: 404 });
       }

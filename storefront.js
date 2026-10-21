@@ -1,4 +1,5 @@
 import db from "./database/database.js";
+import { asset } from "./assets.js";
 
 // Storefront data access and shared markup. Route handling stays in main.js.
 
@@ -42,21 +43,21 @@ export const COLLECTIONS = [
     title: "Jewellery",
     intro: "Earrings, necklaces, rings and bracelets to wear every day and keep for years.",
     keywords: ["jewel", "jwel", "jewl", "earring", "necklace", "ring", "bracelet", "bangle", "pendant", "anklet", "chain"],
-    image: "/images/collection-jewellery.jpg"
+    image: asset("/images/collection-jewellery.jpg")
   },
   {
     key: "makeup",
     title: "Makeup",
     intro: "Colour for lips, eyes and cheeks, with a shade for every skin tone.",
     keywords: ["makeup", "make-up", "cosmetic", "lip", "blush", "eyeshadow", "eye-shadow", "mascara", "liner", "kajal", "foundation", "concealer", "powder", "highlight", "nail"],
-    image: "/images/collection-makeup.jpg"
+    image: asset("/images/collection-makeup.jpg")
   },
   {
     key: "skincare",
     title: "Skincare",
     intro: "Cleansers, serums and moisturisers for a simple, steady daily routine.",
     keywords: ["skin", "serum", "cleanser", "moisturi", "toner", "sunscreen", "facewash", "face-wash", "mask"],
-    image: "/images/collection-skincare.jpg"
+    image: asset("/images/collection-skincare.jpg")
   }
 ];
 
@@ -277,7 +278,7 @@ const icons = {
 export { icons };
 
 export function wordmark(extraClass = "") {
-  return `<a class="wordmark ${extraClass}" href="/" aria-label="${BRAND} home"><img src="/images/bellora-logo.png" alt="Bellora" width="900" height="272"></a>`;
+  return `<a class="wordmark ${extraClass}" href="/" aria-label="${BRAND} home"><img src="${asset("/images/bellora-logo.png")}" alt="Bellora" width="900" height="272"></a>`;
 }
 
 export function siteHeader({ active = "", cartCount = 0, query = "" } = {}) {
