@@ -49,6 +49,8 @@ Third-party code (the SQLite driver and its helpers) is kept in `vendor/` and co
 
 Bundled storefront images, including the hero banner, are served from `./public/images`. Uploaded product images are served from `DATA_DIR/uploads/products`, falling back to `./public/uploads/products`.
 
+Railway deploys every push to `main`. If a merge lands while Railway builds are paused (check status.railway.app), that deploy is skipped: use **Deploy latest commit** on the service, or push or merge a new commit. **Redeploy** on an old deployment rebuilds that old version, not the latest code. To confirm the live version, open `/health` (it returns `{"ok":true}`) and check that the active deployment's commit matches the latest on `main`.
+
 ## Collections
 
 The storefront has three collections: Jewellery (`/collections/jewellery`), Makeup (`/collections/makeup`) and Skincare (`/collections/skincare`). Each one includes the top-level categories whose name matches it (for example "Jewellery", "Earrings", "Lipstick", "Skincare", "Serum") plus their sub-categories. Keyword lists are in `storefront.js` under `COLLECTIONS`.
