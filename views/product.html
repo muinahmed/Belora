@@ -73,6 +73,12 @@
   // The checked shade wins when several shades share one photo.
   const showImage = (src) => {
     if (!src || !mainImage) return;
+    if (mainImage.getAttribute("src") !== src) {
+      // Cross-fade: dim, swap, and fade back in once the new photo has loaded.
+      mainImage.classList.add("is-swapping");
+      mainImage.addEventListener("load", () => mainImage.classList.remove("is-swapping"), { once: true });
+      mainImage.addEventListener("error", () => mainImage.classList.remove("is-swapping"), { once: true });
+    }
     mainImage.src = src;
     thumbs.forEach((thumb) => thumb.setAttribute("aria-pressed", String(thumb.dataset.image === src)));
     const checked = variantInputs.find((input) => input.checked);

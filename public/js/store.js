@@ -27,6 +27,9 @@
       }
       badge.textContent = count;
       link.setAttribute("aria-label", label);
+      badge.classList.remove("bump");
+      void badge.offsetWidth; // restart the animation when adding twice in a row
+      badge.classList.add("bump");
     });
     const navBag = document.querySelector(".mobile-bottom-nav a[href='/cart']");
     if (navBag?.lastChild) navBag.lastChild.textContent = `Bag (${count})`;
@@ -81,4 +84,41 @@
   });
 
   globalThis.BelloraBag = { add, close };
+})();
+
+// Motion: scroll reveal and the header's scrolled state. Skipped entirely for visitors who
+// ask their device for reduced motion.
+(() => {
+  const header = document.querySelector(".site-header");
+  if (header) {
+    const onScroll = () => header.classList.toggle("is-scrolled", scrollY > 8);
+    addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+  }
+
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches || !("IntersectionObserver" in globalThis)) return;
+  // Only items starting below the first screen are hidden, so nothing visible on arrival
+  // ever blinks out. Cards in a row follow one another by 70 ms.
+  const selector = ".shelf-head, .card, .collection-tile, .sale-copy, .assurance-grid > div, .collection-about, .related .shelf-head";
+  const items = [...document.querySelectorAll(selector)].filter((item) => item.getBoundingClientRect().top > innerHeight);
+  if (!items.length) return;
+  const reveal = (item) => {
+    item.classList.add("is-visible");
+    observer.unobserve(item);
+  };
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) if (entry.isIntersecting) reveal(entry.target);
+  });
+  // Safety net: at the bottom of the page everything left is shown, so nothing can stay hidden.
+  addEventListener("scroll", () => {
+    if (innerHeight + scrollY >= document.documentElement.scrollHeight - 4) {
+      document.querySelectorAll(".reveal:not(.is-visible)").forEach(reveal);
+    }
+  }, { passive: true });
+  for (const item of items) {
+    const siblings = item.parentElement ? [...item.parentElement.children] : [];
+    item.style.setProperty("--reveal-delay", `${(siblings.indexOf(item) % 4) * 70}ms`);
+    item.classList.add("reveal");
+    observer.observe(item);
+  }
 })();
