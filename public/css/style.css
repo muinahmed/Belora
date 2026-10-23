@@ -1053,6 +1053,8 @@ img.img-fade.is-loaded { opacity: 1; }
 .hero-title .word:nth-child(2) { animation-delay: .27s; }
 .hero-title .word:nth-child(3) { animation-delay: .39s; }
 .hero-title .word:nth-child(4) { animation-delay: .51s; }
+.hero-title .word:nth-child(5) { animation-delay: .63s; }
+.hero-title .word:nth-child(6) { animation-delay: .75s; }
 @keyframes word-rise { from { opacity: 0; transform: translateY(.45em); } to { opacity: 1; transform: none; } }
 
 @media (prefers-reduced-motion: reduce) {
