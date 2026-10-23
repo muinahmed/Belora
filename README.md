@@ -67,7 +67,12 @@ The storefront has three collections: Jewellery (`/collections/jewellery`), Make
 - Sold-out products offer "Ask on WhatsApp" when `SHOP_WHATSAPP_NUMBER` is set
 - Order tracking at `/track-order` with the order number and phone
 - Admin: products (search, low stock, pagination), categories, orders (status and date filters, totals, CSV download for Excel), packing slips, 30-day analytics, one-click database backup
-- Sitemap at `/sitemap.xml`, `robots.txt`, and a health check at `/health` (Railway → Settings → Healthcheck Path)
+- Readable product addresses (`/product/pearl-drop-earrings`); old `/product/<id>` links and a renamed product's earlier address redirect permanently
+- Photos are shrunk in the admin's browser before upload (at most 1600px, WebP or JPEG)
+- Optional search keywords per product (any language, including Bangla and Banglish), used by the shop search
+- Collection introductions and longer collection texts, edited at Admin → Collections
+- Structured data for search engines: store details and site search on the homepage, breadcrumbs on product and collection pages, product details on product pages
+- Sitemap at `/sitemap.xml` (with last-updated dates and product photos), `robots.txt`, and a health check at `/health` (Railway → Settings → Healthcheck Path)
 
 ## Important
 

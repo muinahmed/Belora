@@ -11,6 +11,13 @@ export const SHOP_WHATSAPP_NUMBER = (Deno.env.get("SHOP_WHATSAPP_NUMBER") || "")
 export const RETURNS_POLICY = Deno.env.get("RETURNS_POLICY")?.trim() ||
   "If there is a problem with your order, contact us after delivery and we will help sort it out.";
 
+// A product's web address: /product/pearl-drop-earrings. A missing or all-digit slug would
+// read as a product number, so those products keep /product/<id>.
+export function productPath(product) {
+  const slug = product.slug ?? "";
+  return slug && !/^\d+$/.test(slug) ? `/product/${encodeURIComponent(slug)}` : `/product/${product.id}`;
+}
+
 export function escapeHtml(value = "") {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -114,7 +121,7 @@ const IMAGE_SQL = `COALESCE(
 const PRICE_SQL = "(CASE WHEN p.sale_price IS NOT NULL AND p.sale_price >= 0 AND p.sale_price < p.price THEN p.sale_price ELSE p.price END)";
 const ON_SALE_SQL = "(p.sale_price IS NOT NULL AND p.sale_price >= 0 AND p.sale_price < p.price)";
 const CARD_SQL = `SELECT p.id, p.name, p.price, p.sale_price, p.stock, p.is_featured, c.name, ${IMAGE_SQL},
-  (SELECT COUNT(*) FROM product_variants WHERE product_id = p.id)
+  (SELECT COUNT(*) FROM product_variants WHERE product_id = p.id), p.slug
   FROM products p LEFT JOIN categories c ON c.id = p.category_id`;
 
 function toCard(row) {
@@ -127,7 +134,8 @@ function toCard(row) {
     featured: Number(row[5]) === 1,
     categoryName: row[6] ?? "",
     image: row[7] ?? "",
-    hasVariants: Number(row[8]) > 0
+    hasVariants: Number(row[8]) > 0,
+    slug: row[9] ?? ""
   };
 }
 
@@ -151,8 +159,8 @@ function listingWhere(filters) {
     else { where.push(`p.category_id IN (${inList(filters.categoryIds)})`); params.push(...filters.categoryIds); }
   }
   if (filters.q) {
-    where.push("(LOWER(p.name) LIKE LOWER(?) OR LOWER(COALESCE(p.description, '')) LIKE LOWER(?) OR LOWER(COALESCE(c.name, '')) LIKE LOWER(?))");
-    params.push(`%${filters.q}%`, `%${filters.q}%`, `%${filters.q}%`);
+    where.push("(LOWER(p.name) LIKE LOWER(?) OR LOWER(COALESCE(p.description, '')) LIKE LOWER(?) OR LOWER(COALESCE(c.name, '')) LIKE LOWER(?) OR LOWER(COALESCE(p.search_keywords, '')) LIKE LOWER(?))");
+    params.push(`%${filters.q}%`, `%${filters.q}%`, `%${filters.q}%`, `%${filters.q}%`);
   }
   if (Number.isFinite(filters.minPrice)) { where.push(`${PRICE_SQL} >= ?`); params.push(filters.minPrice); }
   if (Number.isFinite(filters.maxPrice)) { where.push(`${PRICE_SQL} <= ?`); params.push(filters.maxPrice); }
@@ -399,7 +407,7 @@ export function productCard(product) {
       ? `<a class="card-action card-ask" target="_blank" rel="noreferrer" href="https://wa.me/${SHOP_WHATSAPP_NUMBER}?text=${encodeURIComponent(`Hello! Is "${product.name}" back in stock?`)}">Ask on WhatsApp</a>`
       : "";
   } else if (product.hasVariants) {
-    action = `<a class="card-action" href="/product/${product.id}">Choose option</a>`;
+    action = `<a class="card-action" href="${productPath(product)}">Choose option</a>`;
   } else {
     action = `<form class="card-add" method="POST" action="/cart/add">
         <input type="hidden" name="product_id" value="${product.id}"><input type="hidden" name="quantity" value="1">
@@ -407,10 +415,10 @@ export function productCard(product) {
       </form>`;
   }
   return `<article class="card${product.stock < 1 ? " is-soldout" : ""}">
-    <a class="card-media" href="/product/${product.id}" tabindex="-1" aria-hidden="true">${image}${tag}</a>
+    <a class="card-media" href="${productPath(product)}" tabindex="-1" aria-hidden="true">${image}${tag}</a>
     <div class="card-body">
       ${product.categoryName ? `<p class="card-category">${escapeHtml(product.categoryName)}</p>` : ""}
-      <h3><a href="/product/${product.id}">${escapeHtml(product.name)}</a></h3>
+      <h3><a href="${productPath(product)}">${escapeHtml(product.name)}</a></h3>
       <p class="card-price"><span${onSale ? ` class="price-sale"` : ""}>${taka(now)}</span>${onSale ? ` <s>${taka(product.price)}</s>` : ""}</p>
       ${stock}
     </div>

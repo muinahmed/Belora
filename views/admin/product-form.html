@@ -7,6 +7,7 @@
     <a href="/admin/dashboard">Dashboard</a>
     <a href="/admin/products">Products</a>
     <a href="/admin/categories">Categories</a>
+    <a href="/admin/collections">Collections</a>
     <a href="/admin/orders">Orders</a>
     <form method="POST" action="/admin/logout"><button class="link-button">Logout</button></form>
   </nav>
@@ -75,6 +76,10 @@
       <label>How to use
         <textarea name="how_to_use" placeholder="Simple usage instructions">{{HOW_TO_USE}}</textarea>
       </label>
+      <label>Search keywords
+        <input name="search_keywords" value="{{SEARCH_KEYWORDS}}" maxlength="300" placeholder="e.g. kaner dul, কানের দুল, jhumka">
+      </label>
+      <p class="muted">Other words customers might search for, in any language (Bangla, Banglish, spelling variations). They help the shop's search box find this product and are not shown on the page.</p>
       <div class="form-two">
         <label>Size / dimensions
           <input name="size_info" value="{{SIZE_INFO}}" placeholder="e.g. Adjustable, 18 cm">
@@ -110,6 +115,66 @@
 
     {{CURRENT_IMAGE}}
 
+    <p class="muted photo-status" aria-live="polite">Large photos are made smaller automatically before upload, so they load fast for customers.</p>
     <button class="btn" type="submit">Save product</button>
   </form>
 </main>
+
+<script>
+  // Shrinks chosen photos in the browser before upload: at most 1600px on the long side,
+  // saved as WebP (JPEG where the browser can't make WebP). Photos already small enough,
+  // GIFs (which may be animated) and anything that fails to convert are uploaded unchanged.
+  const MAX_SIDE = 1600;
+  const KEEP_BELOW_BYTES = 400 * 1024;
+  const status = document.querySelector(".photo-status");
+  const saveButton = document.querySelector(".form-grid button[type=submit]");
+  const pending = new Set();
+
+  const encode = (canvas, type, quality) => new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+
+  async function shrink(file) {
+    if (!file.type.startsWith("image/") || file.type === "image/gif") return file;
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+    if (scale === 1 && file.size <= KEEP_BELOW_BYTES) { bitmap.close(); return file; }
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    let blob = await encode(canvas, "image/webp", 0.82);
+    if (!blob || blob.type !== "image/webp") blob = await encode(canvas, "image/jpeg", 0.85);
+    if (!blob || blob.size >= file.size) return file;
+    const extension = blob.type === "image/webp" ? "webp" : "jpg";
+    return new File([blob], file.name.replace(/\.[^.]+$/, "") + "." + extension, { type: blob.type });
+  }
+
+  const sizeText = (bytes) => bytes >= 1024 * 1024 ? (bytes / 1024 / 1024).toFixed(1) + " MB" : Math.round(bytes / 1024) + " KB";
+
+  document.querySelectorAll(".form-grid input[type=file]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const files = [...input.files];
+      if (!files.length || !window.DataTransfer || !window.createImageBitmap) return;
+      const job = (async () => {
+        status.textContent = "Preparing photos…";
+        saveButton.disabled = true;
+        const before = files.reduce((sum, file) => sum + file.size, 0);
+        const shrunk = [];
+        for (const file of files) {
+          try { shrunk.push(await shrink(file)); } catch { shrunk.push(file); }
+        }
+        const transfer = new DataTransfer();
+        shrunk.forEach((file) => transfer.items.add(file));
+        input.files = transfer.files;
+        const after = shrunk.reduce((sum, file) => sum + file.size, 0);
+        return after < before ? `Photos ready: ${sizeText(before)} made smaller to ${sizeText(after)}.` : "Photos ready.";
+      })();
+      pending.add(job);
+      const message = await job.finally(() => pending.delete(job));
+      if (!pending.size) {
+        status.textContent = message;
+        saveButton.disabled = false;
+      }
+    });
+  });
+</script>
