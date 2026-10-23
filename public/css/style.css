@@ -1011,3 +1011,51 @@ td a:not(.btn):hover { text-decoration: underline; }
 /* Header: a soft shadow once the page is scrolled. */
 .site-header { transition: box-shadow .25s ease; }
 .site-header.is-scrolled { box-shadow: 0 6px 18px rgba(43, 35, 29, .07); }
+
+/* ---------- Motion, part 2 ---------- */
+
+/* 1. Page changes cross-fade instead of flashing white (browsers with cross-document
+   view transitions; others load pages as before). The header and the phone's bottom bar
+   stay still while the page underneath changes. */
+@media (prefers-reduced-motion: no-preference) {
+  @view-transition { navigation: auto; }
+}
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .25s; }
+.site-header { view-transition-name: site-header; }
+.mobile-bottom-nav { view-transition-name: bottom-nav; }
+
+/* 2. Photos: a soft shimmer while loading, then the photo fades in. /js/store.js adds these
+   classes only to photos that haven't loaded yet, so without the script nothing is hidden. */
+.is-loading { background-image: linear-gradient(100deg, var(--cream) 30%, #FBF4EC 50%, var(--cream) 70%); background-size: 250% 100%; animation: shimmer 1.4s linear infinite; }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+img.img-fade { opacity: 0; transition: opacity .45s ease, transform .9s cubic-bezier(.2, .7, .2, 1); }
+img.img-fade.is-loaded { opacity: 1; }
+
+/* 3. "Fly to bag": a copy of the product photo travels to the bag icon. */
+.fly-to-bag { position: fixed; z-index: 60; margin: 0; object-fit: cover; border-radius: 6px; pointer-events: none; box-shadow: 0 10px 30px rgba(43, 35, 29, .25); }
+
+/* 4. Filters and product details open and close smoothly (browsers that can animate to
+   "auto" height; others open instantly as before). */
+@supports (interpolate-size: allow-keywords) {
+  @media (prefers-reduced-motion: no-preference) {
+    :root { interpolate-size: allow-keywords; }
+    .pd-details details::details-content, .filters-panel::details-content {
+      block-size: 0; overflow: clip;
+      transition: block-size .32s cubic-bezier(.2, .7, .2, 1), content-visibility .32s allow-discrete;
+    }
+    .pd-details details[open]::details-content, .filters-panel[open]::details-content { block-size: auto; }
+  }
+}
+
+/* 5. Homepage headline rises in word by word. */
+.hero-title .word { display: inline-block; animation: word-rise .7s cubic-bezier(.2, .7, .2, 1) both; }
+.hero-title .word:nth-child(1) { animation-delay: .15s; }
+.hero-title .word:nth-child(2) { animation-delay: .27s; }
+.hero-title .word:nth-child(3) { animation-delay: .39s; }
+.hero-title .word:nth-child(4) { animation-delay: .51s; }
+@keyframes word-rise { from { opacity: 0; transform: translateY(.45em); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-title .word, .is-loading { animation: none; }
+  img.img-fade { opacity: 1; }
+}

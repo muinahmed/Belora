@@ -41,7 +41,7 @@ Online shop for jewellery, makeup and skincare in Bangladesh, with cash on deliv
 - **Order tracking** at `/track-order`, using the order number and phone: Order received → Confirmed → Packing → Out for delivery → Delivered.
 - **Contact:** floating WhatsApp button, plus phone and social links in the footer.
 - **Fast pages:** WebP banner, photos shrunk at upload, browser caching, images loaded as you scroll.
-- **Subtle animations:** sections and products fade up as you scroll, the banner settles in with a slow zoom, photos zoom slightly on hover, the bag count pops when something is added, photos cross-fade when switching shades, and the header gains a soft shadow on scroll. All of them are off for visitors whose device asks for reduced motion.
+- **Subtle animations:** pages cross-fade when navigating (header and bottom bar stay still); the banner headline rises in word by word and the banner settles in with a slow zoom; sections and products fade up as you scroll; photos show a soft shimmer while loading, then fade in; photos zoom slightly on hover; on **Add to bag** the product photo flies into the bag and the count pops; filters and product details slide open; photos cross-fade when switching shades; the header gains a soft shadow on scroll. All of them are off for visitors whose device asks for reduced motion, and browsers without a feature (for example page cross-fades or sliding details) simply skip it.
 
 ### For the shop owner (admin)
 - **Dashboard:** counts, low stock, 30-day analytics (views, bag adds, checkouts started, orders), and **Download backup**.

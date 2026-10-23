@@ -35,8 +35,40 @@
     if (navBag?.lastChild) navBag.lastChild.textContent = `Bag (${count})`;
   };
 
-  const showAdded = (result) => {
-    updateCount(result.count);
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // "Fly to bag": a copy of the product photo travels from where it is on screen to the
+  // visible bag icon. Resolves when it lands (at once when there's nothing to animate).
+  const flyToBag = (source) => new Promise((resolve) => {
+    const target = [...document.querySelectorAll(".bag-link")].find((link) => link.getBoundingClientRect().width > 0);
+    if (!source || !target || reduceMotion || !source.animate) return resolve();
+    const from = source.getBoundingClientRect();
+    if (!from.width || from.bottom < 0 || from.top > innerHeight) return resolve();
+    const to = target.getBoundingClientRect();
+    const size = Math.min(from.width, from.height, 160);
+    const startX = from.left + from.width / 2 - size / 2;
+    const startY = from.top + from.height / 2 - size / 2;
+    const dx = to.left + to.width / 2 - (startX + size / 2);
+    const dy = to.top + to.height / 2 - (startY + size / 2);
+    const clone = document.createElement("img");
+    clone.src = source.currentSrc || source.src;
+    clone.alt = "";
+    clone.className = "fly-to-bag";
+    Object.assign(clone.style, { left: `${startX}px`, top: `${startY}px`, width: `${size}px`, height: `${size}px` });
+    document.body.append(clone);
+    const flight = clone.animate([
+      { transform: "translate(0, 0) scale(1)", opacity: 1 },
+      { transform: `translate(${dx * 0.45}px, ${dy * 0.45 - 40}px) scale(.55)`, opacity: 1, offset: 0.45 },
+      { transform: `translate(${dx}px, ${dy}px) scale(.1)`, opacity: .4 }
+    ], { duration: 700, easing: "cubic-bezier(.45, 0, .55, 1)" });
+    const land = () => { clone.remove(); resolve(); };
+    flight.onfinish = land;
+    flight.oncancel = land;
+  });
+
+  const showAdded = (result, source) => {
+    // The count updates (and pops) as the photo reaches the bag.
+    flyToBag(source).then(() => updateCount(result.count));
     title.textContent = "Added to bag";
     item.textContent = result.variant ? `${result.name} (${result.variant})` : result.name;
     actions.hidden = false;
@@ -55,10 +87,12 @@
   // Adds a form's item in the background. Resolves true when handled here; false means
   // the caller should send the form the ordinary way (the request itself failed).
   const add = async (form) => {
+    const photo = form.closest(".card")?.querySelector(".card-media img")
+      ?? (form.id === "pd-form" ? document.querySelector(".pd-main-image img") : null);
     try {
       const response = await fetch(form.action, { method: "POST", body: new FormData(form), headers: { Accept: "application/json" } });
       const result = await response.json();
-      if (result.ok) showAdded(result);
+      if (result.ok) showAdded(result, photo);
       else showError(result.error);
       return true;
     } catch {
@@ -84,6 +118,24 @@
   });
 
   globalThis.BelloraBag = { add, close };
+})();
+
+// Photos: a shimmer while loading, then a fade-in. Only photos that haven't loaded when
+// this runs are touched, so photos already on screen never blink.
+(() => {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  for (const img of document.querySelectorAll(".card-media img, .pd-main-image img, .tile-media img, .bag-media img")) {
+    if (img.complete && img.naturalWidth) continue;
+    const box = img.parentElement;
+    box.classList.add("is-loading");
+    img.classList.add("img-fade");
+    const done = () => {
+      img.classList.add("is-loaded");
+      box.classList.remove("is-loading");
+    };
+    img.addEventListener("load", done, { once: true });
+    img.addEventListener("error", done, { once: true });
+  }
 })();
 
 // Motion: scroll reveal and the header's scrolled state. Skipped entirely for visitors who
