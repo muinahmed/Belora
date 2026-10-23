@@ -119,7 +119,7 @@ function breadcrumbData(items, origin, currentPath) {
 }
 
 function page(title, content, options = {}) {
-  const description = options.description || `Shop jewellery, makeup and skincare at ${BRAND}, with cash on delivery across Bangladesh.`;
+  const description = options.description || `Shop makeup, skincare and jewellery at ${BRAND}, with cash on delivery across Bangladesh.`;
   const image = options.image || asset("/images/beauty-hero-banner.jpg");
   const absolute = (path) => PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}${path}` : path;
   return `<!doctype html>
@@ -929,7 +929,7 @@ ${entries.map(entry => `<url><loc>${escapeHtml(entry.loc)}</loc>${entry.lastmod 
         <div class="wrap sale-inner${saleItems.length < 4 ? " sale-inner-text" : ""}">
           <div class="sale-copy">
             <h2>The sale edit</h2>
-            <p>Selected jewellery, makeup and skincare at reduced prices, while stock lasts.</p>
+            <p>Selected makeup, skincare and jewellery at reduced prices, while stock lasts.</p>
             <a class="btn btn-dark" href="/products?sale=1">Shop the sale</a>
           </div>
           ${saleItems.length >= 4 ? productGrid(saleItems, "grid-compact") : ""}
@@ -956,7 +956,7 @@ ${entries.map(entry => `<url><loc>${escapeHtml(entry.loc)}</loc>${entry.lastmod 
         : shelfSection("Popular right now", [...bestsellers, ...popularProducts(4 - bestsellers.length, bestsellers.map(product => product.id))], "", "");
 
       const view = await readView("home.html");
-      return html(page("Jewellery, makeup and skincare", fill(view, {
+      return html(page("Makeup, skincare and jewellery", fill(view, {
         HEADER: storeHeader(request, "home"),
         FOOTER: storeFooter(),
         COLLECTION_TILES: tiles,
@@ -1048,7 +1048,7 @@ ${entries.map(entry => `<url><loc>${escapeHtml(entry.loc)}</loc>${entry.lastmod 
       const facets = listingFacets(filters);
 
       let title = "Shop all";
-      let intro = "Jewellery, makeup and skincare, with new pieces added every week.";
+      let intro = "Makeup, skincare and jewellery, with new pieces added every week.";
       const crumbs = [["Home", "/"]];
       if (collection) {
         title = collection.title;
@@ -1063,7 +1063,7 @@ ${entries.map(entry => `<url><loc>${escapeHtml(entry.loc)}</loc>${entry.lastmod 
       }
       if (state.sale && !collection && !scoped?.category) {
         title = "Sale";
-        intro = "Reduced prices across jewellery, makeup and skincare, while stock lasts.";
+        intro = "Reduced prices across makeup, skincare and jewellery, while stock lasts.";
         crumbs.push(["Sale", ""]);
       }
       if (state.q) {

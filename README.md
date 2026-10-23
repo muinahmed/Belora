@@ -1,6 +1,6 @@
 # Bellora BD
 
-Online shop for jewellery, makeup and skincare in Bangladesh, with cash on delivery, bKash and Nagad. Built with [Deno](https://deno.com) and SQLite. There is no framework and no build step: one server program renders every page.
+Online shop for makeup, skincare and jewellery in Bangladesh, with cash on delivery, bKash and Nagad. Built with [Deno](https://deno.com) and SQLite. There is no framework and no build step: one server program renders every page.
 
 - **Live site:** https://belora-production-865f.up.railway.app (Railway)
 - **Admin:** `/admin/login`, also linked as "Staff login" in the footer
@@ -32,7 +32,7 @@ Online shop for jewellery, makeup and skincare in Bangladesh, with cash on deliv
 ## Features
 
 ### For customers
-- **Homepage:** banner, Jewellery / Makeup / Skincare tiles, new arrivals, a sale section, bestsellers ("Popular right now" until there are four real bestsellers), featured picks.
+- **Homepage:** banner, Makeup / Jewellery / Skincare tiles, new arrivals, a sale section, bestsellers ("Popular right now" until there are four real bestsellers), featured picks.
 - **Shop and collection pages:** search; sub-category chips; filters for price, availability, sale, material, shade and skin concern; sorting; 24 products per page. Filter options only show values found among the products on screen.
 - **Product cards:** **Add to bag** without leaving the page, **Choose option** for products with shades, **Ask on WhatsApp** when sold out.
 - **Product pages:** photo gallery, shade or design options with their own photos and stock, sale price, stock level, details (ingredients, how to use, material, size, care), delivery and returns, "You may also like". There are two buttons: **Add to bag** (stays on the page and shows an "Added to bag" panel) and **Buy now** (straight to checkout). On phones a bar with both buttons stays at the bottom of the screen.
@@ -103,7 +103,7 @@ Anything left unset is simply not shown.
 - **Design options (shades):** give an option label (for example "Shade"), then one name per line, one stock number per line in the same order, and photos in the same order. Set the main stock to the total.
 - **Photos:** the first gallery photo is the main photo. Photos are shrunk in your browser before upload (at most 1600 px, WebP), and the status line under the form shows the savings. Uploading new gallery photos replaces the old ones.
 
-**Categories and collections:** the shop has three fixed collections, **Jewellery**, **Makeup** and **Skincare**. A main category joins a collection when its name contains a matching word: for example "Earrings", "Necklace" or "Jewellery" go to Jewellery; "Lipstick", "Blush" or "Kajal" to Makeup; "Serum", "Cleanser" or "Sunscreen" to Skincare. Sub-categories follow their main category. The word lists are `COLLECTIONS` in `storefront.js`. A category that matches no collection still works, but its products only appear under "Shop all" and in search.
+**Categories and collections:** the shop has three fixed collections, shown in this order: **Makeup**, **Jewellery** and **Skincare** (the order of `COLLECTIONS` in `storefront.js`). A main category joins a collection when its name contains a matching word: for example "Earrings", "Necklace" or "Jewellery" go to Jewellery; "Lipstick", "Blush" or "Kajal" to Makeup; "Serum", "Cleanser" or "Sunscreen" to Skincare. Sub-categories follow their main category. The word lists are `COLLECTIONS` in `storefront.js`. A category that matches no collection still works, but its products only appear under "Shop all" and in search.
 
 **Collection texts:** Collections → write a short **introduction** (shown under the title) and a longer **About** text (shown under the products; leave a blank line between paragraphs). Leave a field empty to use the default.
 

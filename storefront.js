@@ -44,20 +44,21 @@ export function effectivePrice(price, salePrice) {
 // admin created, matched by keyword so "Jewellery", "jwellery" or "Earrings"
 // all land in the right place. Child categories follow their parent.
 
+// Display order: navigation, homepage tiles, footer and chips follow this list.
 export const COLLECTIONS = [
-  {
-    key: "jewellery",
-    title: "Jewellery",
-    intro: "Earrings, necklaces, rings and bracelets to wear every day and keep for years.",
-    keywords: ["jewel", "jwel", "jewl", "earring", "necklace", "ring", "bracelet", "bangle", "pendant", "anklet", "chain"],
-    image: asset("/images/collection-jewellery.jpg")
-  },
   {
     key: "makeup",
     title: "Makeup",
     intro: "Colour for lips, eyes and cheeks, with a shade for every skin tone.",
     keywords: ["makeup", "make-up", "cosmetic", "lip", "blush", "eyeshadow", "eye-shadow", "mascara", "liner", "kajal", "foundation", "concealer", "powder", "highlight", "nail"],
     image: asset("/images/collection-makeup.jpg")
+  },
+  {
+    key: "jewellery",
+    title: "Jewellery",
+    intro: "Earrings, necklaces, rings and bracelets to wear every day and keep for years.",
+    keywords: ["jewel", "jwel", "jewl", "earring", "necklace", "ring", "bracelet", "bangle", "pendant", "anklet", "chain"],
+    image: asset("/images/collection-jewellery.jpg")
   },
   {
     key: "skincare",
@@ -78,9 +79,13 @@ function allCategories() {
   }));
 }
 
+// Category matching keeps its own fixed priority, so changing the display order above never
+// moves a category whose name fits two collections (for example "Spring lip ring").
+const MATCH_PRIORITY = ["jewellery", "makeup", "skincare"];
+
 function collectionKeyFor(category) {
   const haystack = `${category.slug} ${String(category.name).toLowerCase()}`;
-  return COLLECTIONS.find(collection => collection.keywords.some(keyword => haystack.includes(keyword)))?.key ?? null;
+  return MATCH_PRIORITY.map(getCollection).find(collection => collection.keywords.some(keyword => haystack.includes(keyword)))?.key ?? null;
 }
 
 // Returns { key: { roots: [category], ids: [id] } } for every collection.
@@ -318,7 +323,7 @@ export function siteHeader({ active = "", cartCount = 0, query = "" } = {}) {
     <div class="header-tools">
       <form class="header-search" method="GET" action="/products" role="search">
         <label class="search-icon" for="site-search">${icons.search}<span class="visually-hidden">Search products</span></label>
-        <input id="site-search" name="q" type="search" value="${escapeHtml(query)}" placeholder="Search jewellery, makeup, skincare" enterkeyhint="search" autocomplete="off">
+        <input id="site-search" name="q" type="search" value="${escapeHtml(query)}" placeholder="Search makeup, skincare, jewellery" enterkeyhint="search" autocomplete="off">
       </form>
       <a class="bag-link" href="/cart" aria-label="Shopping bag, ${cartCount} ${cartCount === 1 ? "item" : "items"}">${icons.bag}<span>Bag</span>${cartCount ? `<b class="bag-count">${cartCount}</b>` : ""}</a>
     </div>
@@ -345,7 +350,7 @@ export function siteFooter(contact = {}, { scriptSrc = "" } = {}) {
   <div class="wrap footer-grid${contactLinks.length ? " has-contact" : ""}">
     <div class="footer-brand">
       ${wordmark()}
-      <p>Jewellery, makeup and skincare, chosen piece by piece and delivered across Bangladesh.</p>
+      <p>Makeup, skincare and jewellery, chosen one by one and delivered across Bangladesh.</p>
     </div>
     <nav aria-label="Shop">
       <h2>Shop</h2>
