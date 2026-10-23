@@ -2120,7 +2120,7 @@ return redirect("/admin/products");
       return redirect("/admin/products");
     }
 
-    // ---------- Admin categories ----------
+    // ---------- Admin collections ----------
     // Collection texts: the short introduction under each collection's title and a longer
     // text under its products. Empty fields fall back to the built-in introduction / no text.
     if (url.pathname === "/admin/collections" && request.method === "GET") {
@@ -2158,6 +2158,7 @@ return redirect("/admin/products");
       return redirect("/admin/collections?saved=1");
     }
 
+    // ---------- Admin categories ----------
     if (url.pathname === "/admin/categories" && request.method === "GET") {
       const denied = adminGuard(request);
       if (denied) return denied;
