@@ -4,7 +4,7 @@ import {
   BRAND, COLLECTIONS, DELIVERY_CHARGES, PAGE_SIZE, RETURNS_POLICY, SORTS, breadcrumbs, categoryById, categoryScope,
   categoriesWithCounts, collectionMap, countActive, effectivePrice, escapeHtml,
   getCollection, icons, listProducts, listingFacets, pagination, productGrid, relatedProducts,
-  displayName, popularProducts, shelf, shelfSection, siteFooter, siteHeader, taka, SHOP_WHATSAPP_NUMBER
+  displayName, popularProducts, productPath, shelf, shelfSection, siteFooter, siteHeader, taka, SHOP_WHATSAPP_NUMBER
 } from "./storefront.js";
 
 const publicDir = "./public";
@@ -89,6 +89,35 @@ function slugify(value = "") {
     .replace(/^-+|-+$/g, "");
 }
 
+// The site's public address: PUBLIC_BASE_URL when set, otherwise this request's host.
+// Railway ends HTTPS at its proxy, so the scheme comes from X-Forwarded-Proto.
+function siteOrigin(request) {
+  if (PUBLIC_BASE_URL) return PUBLIC_BASE_URL;
+  const url = new URL(request.url);
+  const proto = request.headers.get("x-forwarded-proto")?.split(",")[0].trim();
+  return `${proto === "https" || proto === "http" ? proto : url.protocol.slice(0, -1)}://${url.host}`;
+}
+
+// JSON-LD for structured data. "<" is escaped so the text can't close the script tag.
+function jsonLd(data) {
+  return `<script type="application/ld+json">${JSON.stringify(data).replaceAll("<", "\\u003c")}</script>`;
+}
+
+// Breadcrumb trail for Google, from the same [label, href] pairs as the visible breadcrumbs.
+// The last item (the current page, without href) uses currentPath.
+function breadcrumbData(items, origin, currentPath) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: items.map(([label, href], index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      name: label,
+      item: `${origin}${href || currentPath}`
+    }))
+  };
+}
+
 function page(title, content, options = {}) {
   const description = options.description || `Shop jewellery, makeup and skincare at ${BRAND}, with cash on delivery across Bangladesh.`;
   const image = options.image || asset("/images/beauty-hero-banner.jpg");
@@ -117,6 +146,7 @@ function page(title, content, options = {}) {
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..700;1,6..96,400..600&family=Jost:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="/css/style.css?v=${STYLESHEET_VERSION}">
+  ${(options.jsonLd ?? []).map(jsonLd).join("\n  ")}
 </head>
 <body>
 <a class="skip-link" href="#main-content">Skip to content</a>
@@ -285,6 +315,7 @@ function adminHeader(title) {
     <a href="/admin/dashboard">Dashboard</a>
     <a href="/admin/products">Products</a>
     <a href="/admin/categories">Categories</a>
+    <a href="/admin/collections">Collections</a>
     <a href="/admin/orders">Orders</a>
     <form method="POST" action="/admin/logout"><button class="link-button">Logout</button></form>
   </nav>
@@ -326,7 +357,7 @@ function getProduct(id) {
              (SELECT image_path FROM product_images
               WHERE product_id = p.id AND is_main = 1 LIMIT 1), ''
            ) AS image_path,
-           p.sale_price, p.is_featured
+           p.sale_price, p.is_featured, p.search_keywords
     FROM products p
     LEFT JOIN categories c ON c.id = p.category_id
     WHERE p.id = ?
@@ -369,6 +400,7 @@ function getProduct(id) {
     imagePath: row[16] ?? "",
     salePrice: row[17] === null ? null : Number(row[17]),
     featured: Number(row[18]) === 1,
+    searchKeywords: row[19] ?? "",
     // The price customers pay: the sale price while it is valid, else the regular price.
     unitPrice: effectivePrice(row[5], row[17]),
     images: images.map(image => ({
@@ -415,6 +447,20 @@ function getCartDetails(request) {
 
 function totalForCart(details) {
   return details.reduce((sum, item) => sum + item.lineTotal, 0);
+}
+
+function getSetting(key) {
+  return db.query("SELECT value FROM site_settings WHERE key = ?", [key])[0]?.[0] ?? "";
+}
+
+function setSetting(key, value) {
+  if (value) db.query("INSERT INTO site_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [key, value]);
+  else db.query("DELETE FROM site_settings WHERE key = ?", [key]);
+}
+
+// Paragraphs from plain text: blank lines separate paragraphs; everything is escaped.
+function textParagraphs(text) {
+  return String(text).split(/\n\s*\n/).map(part => part.trim()).filter(Boolean).map(part => `<p>${escapeHtml(part)}</p>`).join("");
 }
 
 function trackEvent(eventType, productId = null) {
@@ -810,15 +856,33 @@ async function handleRequest(request, info) {
     }
 
     if (url.pathname === "/sitemap.xml" && request.method === "GET") {
-      const base = PUBLIC_BASE_URL || url.origin;
-      const products = db.query("SELECT id FROM products WHERE is_active = 1");
-      const urls = [`${base}/`, `${base}/products`, ...COLLECTIONS.map(collection => `${base}/collections/${collection.key}`), ...products.map(([id]) => `${base}/product/${id}`)];
-      const xml = `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.map(entry => `<url><loc>${escapeHtml(entry)}</loc></url>`).join("")}</urlset>`;
+      // Products carry their last update date and main photo, so search engines notice
+      // changes and can list the photos in image search.
+      const base = siteOrigin(request);
+      const products = db.query(`
+        SELECT p.id, p.slug, date(COALESCE(p.updated_at, p.created_at)),
+          COALESCE((SELECT image_path FROM product_images WHERE product_id = p.id ORDER BY is_main DESC, id LIMIT 1), '')
+        FROM products p WHERE p.is_active = 1 ORDER BY p.id
+      `);
+      const entries = [
+        { loc: `${base}/` },
+        { loc: `${base}/products` },
+        ...COLLECTIONS.map(collection => ({ loc: `${base}/collections/${collection.key}` })),
+        ...products.map(([id, slug, updated, image]) => ({
+          loc: `${base}${productPath({ id, slug })}`,
+          lastmod: updated,
+          image: image ? `${base}${image}` : ""
+        }))
+      ];
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+${entries.map(entry => `<url><loc>${escapeHtml(entry.loc)}</loc>${entry.lastmod ? `<lastmod>${escapeHtml(entry.lastmod)}</lastmod>` : ""}${entry.image ? `<image:image><image:loc>${escapeHtml(entry.image)}</image:loc></image:image>` : ""}</url>`).join("\n")}
+</urlset>`;
       return new Response(xml, { headers: { "content-type": "application/xml; charset=utf-8" } });
     }
 
     if (url.pathname === "/robots.txt" && request.method === "GET") {
-      const base = PUBLIC_BASE_URL || url.origin;
+      const base = siteOrigin(request);
       const body = [
         "User-agent: *",
         "Disallow: /admin",
@@ -901,7 +965,28 @@ async function handleRequest(request, info) {
         BESTSELLERS: bestsellersSection,
         FEATURED: shelfSection("Our picks", shelf("featured", 4), "/products?sort=featured", "View all", "shelf-soft"),
         ASSURANCE: assurance
-      }), { canonical: "/" }));
+      }), {
+        canonical: "/",
+        jsonLd: [{
+          "@context": "https://schema.org",
+          "@type": "OnlineStore",
+          name: BRAND,
+          url: `${siteOrigin(request)}/`,
+          logo: `${siteOrigin(request)}${asset("/images/bellora-logo.png")}`,
+          sameAs: [SHOP_CONTACT.facebook, SHOP_CONTACT.instagram, SHOP_CONTACT.tiktok].filter(Boolean),
+          ...(SHOP_CONTACT.phone ? { telephone: SHOP_CONTACT.phone } : {})
+        }, {
+          "@context": "https://schema.org",
+          "@type": "WebSite",
+          name: BRAND,
+          url: `${siteOrigin(request)}/`,
+          potentialAction: {
+            "@type": "SearchAction",
+            target: `${siteOrigin(request)}/products?q={search_term_string}`,
+            "query-input": "required name=search_term_string"
+          }
+        }]
+      }));
     }
 
     // ---------- Shop and collections ----------
@@ -967,7 +1052,7 @@ async function handleRequest(request, info) {
       const crumbs = [["Home", "/"]];
       if (collection) {
         title = collection.title;
-        intro = collection.intro;
+        intro = getSetting(`collection_intro_${collection.key}`) || collection.intro;
         crumbs.push([collection.title, scoped?.category ? base : ""]);
       } else {
         crumbs.push(["Shop", scoped?.category || state.sale || state.q ? "/products" : ""]);
@@ -1076,20 +1161,43 @@ async function handleRequest(request, info) {
         SORT_HIDDEN_FIELDS: hidden(Object.entries(state).filter(([key]) => key !== "sort").map(([key, value]) => [key, String(value)])),
         SORT_OPTIONS: Object.entries(SORTS).map(([key, sort]) => `<option value="${key}" ${state.sort === key ? "selected" : ""}>${sort.label}</option>`).join(""),
         PRODUCTS: products,
-        PAGINATION: pagination(listing.page, listing.pages, (n) => hrefWith({ page: n }))
+        PAGINATION: pagination(listing.page, listing.pages, (n) => hrefWith({ page: n })),
+        // The longer collection text sits under the products on the collection's first, unfiltered page.
+        COLLECTION_TEXT: (() => {
+          const text = collection && !scoped?.category && listing.page === 1 && !activeFilters && !state.q
+            ? getSetting(`collection_text_${collection.key}`) : "";
+          return text ? `<section class="wrap collection-about" aria-labelledby="collection-about-title"><h2 id="collection-about-title">About our ${escapeHtml(collection.title.toLowerCase())}</h2>${textParagraphs(text)}</section>` : "";
+        })()
       }), {
         description: intro || undefined,
         canonical: collection ? base : "/products",
-        noindex: Boolean(state.q || activeFilters)
+        noindex: Boolean(state.q || activeFilters),
+        jsonLd: [breadcrumbData(crumbs, siteOrigin(request), base)]
       }));
     }
 
     // ---------- Product details ----------
+    // Products live at /product/<slug>. Old /product/<id> links and the earlier slugs of a
+    // renamed product redirect there permanently, so shared links and search results keep working.
     if (url.pathname.startsWith("/product/") && request.method === "GET") {
-      const id = Number(url.pathname.split("/")[2]);
-      const product = getProduct(id);
+      let key = "";
+      try {
+        key = decodeURIComponent(url.pathname.split("/")[2] ?? "");
+      } catch {
+        return notFound(request);
+      }
+      let productId = null;
+      if (/^\d+$/.test(key)) productId = Number(key);
+      else productId = db.query("SELECT id FROM products WHERE slug = ?", [key])[0]?.[0]
+        ?? db.query("SELECT product_id FROM product_slug_history WHERE slug = ?", [key])[0]?.[0]
+        ?? null;
+      const product = productId === null ? null : getProduct(productId);
 
       if (!product || !product.active) return notFound(request);
+      const path = productPath(product);
+      if (url.pathname !== path) {
+        return new Response(null, { status: 301, headers: { Location: path + url.search } });
+      }
       trackEvent("product_view", product.id);
 
       const gallery = [...new Set([
@@ -1159,7 +1267,8 @@ async function handleRequest(request, info) {
       crumbs.push([product.name, ""]);
 
       const related = relatedProducts(product.id, product.categoryId, 4, collection ? collections[collection.key].ids : []);
-      const absolute = (path) => PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}${path}` : `${url.origin}${path}`;
+      const origin = siteOrigin(request);
+      const absolute = (path) => `${origin}${path}`;
       const jsonLd = JSON.stringify({
         "@context": "https://schema.org",
         "@type": "Product",
@@ -1174,7 +1283,7 @@ async function handleRequest(request, info) {
           priceCurrency: "BDT",
           price: product.unitPrice.toFixed(2),
           availability: product.stock > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
-          url: absolute(`/product/${product.id}`)
+          url: absolute(productPath(product))
         }
       }).replaceAll("<", "\\u003c");
 
@@ -1211,7 +1320,8 @@ async function handleRequest(request, info) {
       }), {
         description: (product.description || `${product.name} at ${BRAND}.`).replace(/\s+/g, " ").slice(0, 155),
         image: mainImage || undefined,
-        canonical: `/product/${product.id}`,
+        canonical: productPath(product),
+        jsonLd: [breadcrumbData(crumbs, origin, productPath(product))],
         ogType: "product",
         // Facebook and WhatsApp show these with the link preview.
         meta: [
@@ -1287,11 +1397,11 @@ async function handleRequest(request, info) {
         const onSale = item.product.unitPrice < item.product.price;
         const hiddenFields = `<input type="hidden" name="product_id" value="${item.product.id}"><input type="hidden" name="variant_id" value="${item.variantId ?? ""}">`;
         return `<article class="bag-line">
-          <a class="bag-media" href="/product/${item.product.id}" tabindex="-1" aria-hidden="true">
+          <a class="bag-media" href="${productPath(item.product)}" tabindex="-1" aria-hidden="true">
             ${item.imagePath ? `<img src="${escapeHtml(item.imagePath)}" alt="">` : `<span class="media-placeholder" aria-hidden="true">B</span>`}
           </a>
           <div class="bag-info">
-            <h2><a href="/product/${item.product.id}">${escapeHtml(item.product.name)}</a></h2>
+            <h2><a href="${productPath(item.product)}">${escapeHtml(item.product.name)}</a></h2>
             ${item.variant ? `<p class="bag-variant">${escapeHtml(item.variant.name)}: ${escapeHtml(item.variant.value)}</p>` : ""}
             <p class="bag-unit">${taka(item.product.unitPrice)}${onSale ? ` <s>${taka(item.product.price)}</s>` : ""}</p>
             <form method="POST" action="/cart/remove">${hiddenFields}<button class="link-remove" type="submit">Remove</button></form>
@@ -1795,6 +1905,7 @@ return new Response(
        .replaceAll("{{MATERIAL}}", "")
        .replaceAll("{{SIZE_INFO}}", "")
        .replaceAll("{{CARE_INSTRUCTIONS}}", "")
+       .replaceAll("{{SEARCH_KEYWORDS}}", "")
        .replaceAll("{{CATEGORIES}}", categoryOptions())
        .replaceAll("{{VARIANT_NAME}}", "Design")
        .replaceAll("{{VARIANT_VALUES}}", "")
@@ -1823,6 +1934,7 @@ return new Response(
       const material = form.get("material")?.toString().trim() || null;
       const sizeInfo = form.get("size_info")?.toString().trim() || null;
       const careInstructions = form.get("care_instructions")?.toString().trim() || null;
+      const searchKeywords = form.get("search_keywords")?.toString().trim().slice(0, 300) || null;
       const categoryId = Number(form.get("category_id")) || null;
       const variantName = form.get("variant_name")?.toString().trim();
       const variantValue = form.get("variant_value")?.toString().trim();
@@ -1846,12 +1958,14 @@ return new Response(
       while (db.query("SELECT id FROM products WHERE slug = ?", [slug]).length) {
         slug = `${slugBase}-${n++}`;
       }
+      // A new product takes over this address even if a renamed product used to have it.
+      db.query("DELETE FROM product_slug_history WHERE slug = ?", [slug]);
 
       db.query(`
         INSERT INTO products
-        (category_id, name, slug, description, price, sale_price, is_featured, sku, stock, skin_concern, ingredients, how_to_use, material, size_info, care_instructions)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [categoryId, name, slug, description, price, sale.salePrice, sale.featured, sku, stock, skinConcern, ingredients, howToUse, material, sizeInfo, careInstructions]);
+        (category_id, name, slug, description, price, sale_price, is_featured, sku, stock, skin_concern, ingredients, how_to_use, material, size_info, care_instructions, search_keywords)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [categoryId, name, slug, description, price, sale.salePrice, sale.featured, sku, stock, skinConcern, ingredients, howToUse, material, sizeInfo, careInstructions, searchKeywords]);
 
       const productId = db.query("SELECT last_insert_rowid()")[0][0];
 
@@ -1904,6 +2018,7 @@ return new Response(
        .replaceAll("{{MATERIAL}}", escapeHtml(product.material))
        .replaceAll("{{SIZE_INFO}}", escapeHtml(product.sizeInfo))
        .replaceAll("{{CARE_INSTRUCTIONS}}", escapeHtml(product.careInstructions))
+       .replaceAll("{{SEARCH_KEYWORDS}}", escapeHtml(product.searchKeywords))
        .replaceAll("{{CATEGORIES}}", categoryOptions(product.categoryId))
        .replaceAll("{{VARIANT_NAME}}", escapeHtml(product.variants[0]?.name || "Design"))
        .replaceAll("{{VARIANT_VALUES}}", escapeHtml(product.variants.map(variant => variant.value).join("\n")))
@@ -1938,6 +2053,7 @@ return new Response(
       const material = form.get("material")?.toString().trim() || null;
       const sizeInfo = form.get("size_info")?.toString().trim() || null;
       const careInstructions = form.get("care_instructions")?.toString().trim() || null;
+      const searchKeywords = form.get("search_keywords")?.toString().trim().slice(0, 300) || null;
       const categoryId = Number(form.get("category_id")) || null;
       const variantName = form.get("variant_name")?.toString().trim();
       const variantValue = form.get("variant_value")?.toString().trim();
@@ -1958,14 +2074,19 @@ return new Response(
       let slug = slugify(name) || `product-${id}`;
       const duplicate = db.query("SELECT id FROM products WHERE slug = ? AND id <> ?", [slug, id]);
       if (duplicate.length) slug = `${slug}-${id}`;
+      // Keep the old address so links to it redirect to the renamed product.
+      if (product.slug && product.slug !== slug) {
+        db.query("INSERT OR REPLACE INTO product_slug_history (slug, product_id) VALUES (?, ?)", [product.slug, id]);
+      }
+      db.query("DELETE FROM product_slug_history WHERE slug = ?", [slug]);
 
       db.query(`
         UPDATE products
         SET category_id = ?, name = ?, slug = ?, description = ?,
             price = ?, sale_price = ?, is_featured = ?, sku = ?, stock = ?, skin_concern = ?, ingredients = ?, how_to_use = ?,
-            material = ?, size_info = ?, care_instructions = ?, updated_at = CURRENT_TIMESTAMP
+            material = ?, size_info = ?, care_instructions = ?, search_keywords = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
-      `, [categoryId, name, slug, description, price, sale.salePrice, sale.featured, sku, stock, skinConcern, ingredients, howToUse, material, sizeInfo, careInstructions, id]);
+      `, [categoryId, name, slug, description, price, sale.salePrice, sale.featured, sku, stock, skinConcern, ingredients, howToUse, material, sizeInfo, careInstructions, searchKeywords, id]);
 
       await saveDesignVariants(id, variantPlan);
 
@@ -2000,6 +2121,43 @@ return redirect("/admin/products");
     }
 
     // ---------- Admin categories ----------
+    // Collection texts: the short introduction under each collection's title and a longer
+    // text under its products. Empty fields fall back to the built-in introduction / no text.
+    if (url.pathname === "/admin/collections" && request.method === "GET") {
+      const denied = adminGuard(request);
+      if (denied) return denied;
+      const saved = url.searchParams.get("saved") === "1";
+      const panels = COLLECTIONS.map(collection => `
+        <section class="panel collection-panel">
+          <h2>${collection.title} <a class="text-link" href="/collections/${collection.key}" target="_blank" rel="noreferrer">View</a></h2>
+          <label>Introduction (under the title)
+            <textarea name="intro_${collection.key}" rows="2" maxlength="300" placeholder="${escapeHtml(collection.intro)}">${escapeHtml(getSetting(`collection_intro_${collection.key}`))}</textarea>
+          </label>
+          <label>About this collection (under the products)
+            <textarea name="text_${collection.key}" rows="6" maxlength="3000" placeholder="A few paragraphs about what you sell in this collection, materials, how to choose, delivery. Leave a blank line between paragraphs.">${escapeHtml(getSetting(`collection_text_${collection.key}`))}</textarea>
+          </label>
+        </section>`).join("");
+      return html(adminPage("Collections", `
+        <div class="page-title"><p class="eyebrow">Storefront</p><h1>Collection texts</h1></div>
+        ${saved ? `<p class="success-box" role="status">Saved.</p>` : ""}
+        <p class="muted">Useful, specific text helps customers choose and helps Google show your collections in search. Leave a field empty to use the default.</p>
+        <form method="POST" action="/admin/collections" class="form-grid">
+          ${panels}
+          <button class="btn" type="submit">Save collection texts</button>
+        </form>`));
+    }
+
+    if (url.pathname === "/admin/collections" && request.method === "POST") {
+      const denied = adminGuard(request);
+      if (denied) return denied;
+      const form = await request.formData();
+      for (const collection of COLLECTIONS) {
+        setSetting(`collection_intro_${collection.key}`, form.get(`intro_${collection.key}`)?.toString().trim().slice(0, 300) ?? "");
+        setSetting(`collection_text_${collection.key}`, form.get(`text_${collection.key}`)?.toString().trim().slice(0, 3000) ?? "");
+      }
+      return redirect("/admin/collections?saved=1");
+    }
+
     if (url.pathname === "/admin/categories" && request.method === "GET") {
       const denied = adminGuard(request);
       if (denied) return denied;

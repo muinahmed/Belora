@@ -98,8 +98,9 @@ async function addProduct(admin, fields, { variants = "", photo = PHOTO, photoNa
   return await admin.request("/admin/products/add", { method: "POST", form });
 }
 
+// Reads a product's id from the admin product list, which links /product/<id>.
 function productIdByName(html, name) {
-  const pattern = new RegExp(`href="/product/(\\d+)">${name}<`);
+  const pattern = new RegExp(`href="/product/(\\d+)"[^>]*>${name}<`);
   const match = html.match(pattern);
   assert(match, `product "${name}" is listed`);
   return Number(match[1]);
@@ -161,17 +162,43 @@ Deno.test({
       await t.step("admin adds products", async () => {
         for (const [fields, options] of [
           [{ name: "Plain Ring", price: 1000, stock: 3 }, {}],
-          [{ name: "Bangle", price: 500, stock: 10 }, {}],
+          [{ name: "Bangle", price: 500, stock: 10, search_keywords: "churi, চুড়ি" }, {}],
           [{ name: "Sale Lipstick", price: 900, sale_price: 700, stock: 5 }, { variants: "Mauve Dream\nRose Petal" }],
           [{ name: "Full Price Lipstick", price: 900, stock: 5 }, { variants: "Autumn Nude\nBoss Girl" }]
         ]) {
           const saved = await addProduct(admin, fields, options);
           assertEquals(saved.location, "/admin/products", `${fields.name} saved`);
         }
-        const list = await browser().request("/products");
+        const list = await admin.request("/admin/products");
         ids.ring = productIdByName(list.text, "Plain Ring");
         ids.bangle = productIdByName(list.text, "Bangle");
         ids.sale = productIdByName(list.text, "Sale Lipstick");
+      });
+
+      await t.step("product pages work for products outside the three collections", async () => {
+        // A category that matches no collection, holding a single product: "You may also like"
+        // has to be topped up from the rest of the shop.
+        await admin.request("/admin/categories", { method: "POST", form: { name: "Gift Sets" } });
+        const form = await admin.request("/admin/products/add");
+        const categoryId = form.text.match(/<option value="(\d+)"[^>]*>Gift Sets<\/option>/)?.[1];
+        assert(categoryId, "new category offered on the product form");
+        await addProduct(admin, { name: "Gift Box", price: 1500, stock: 2, category_id: categoryId });
+        const page = await browser().request("/product/gift-box");
+        assertEquals(page.status, 200, "product page status");
+      });
+
+      await t.step("search finds products by their keywords, in any language", async () => {
+        assert((await browser().request("/products?q=churi")).text.includes(">Bangle<"), "Banglish keyword");
+        assert((await browser().request(`/products?q=${encodeURIComponent("চুড়ি")}`)).text.includes(">Bangle<"), "Bangla keyword");
+      });
+
+      await t.step("products have readable addresses; old number links redirect", async () => {
+        const old = await browser().request(`/product/${ids.ring}`);
+        assertEquals(old.status, 301, "number link redirects");
+        assertEquals(old.location, "/product/plain-ring", "redirect target");
+        assertEquals((await browser().request("/product/plain-ring")).status, 200, "readable address works");
+        const listing = await browser().request("/products");
+        assert(listing.text.includes('href="/product/plain-ring"'), "cards link to the readable address");
       });
 
       await t.step("sale page filters list only sale products' shades", async () => {
@@ -260,6 +287,32 @@ Deno.test({
         assert(csv.text.startsWith("﻿Order,Date,Status"), "UTF-8 marker and header row");
         assert(csv.text.includes('"=""01712345678"""'), "phone keeps its leading zero");
         assertEquals((await browser().request("/admin/orders/export.csv")).location, "/admin/login", "needs admin login");
+      });
+
+      await t.step("Google data: sitemap, store details and breadcrumbs", async () => {
+        const sitemap = await browser().request("/sitemap.xml");
+        assert(sitemap.text.includes("/product/plain-ring</loc><lastmod>"), "sitemap lists readable address with date");
+        assert(sitemap.text.includes("<image:loc>"), "sitemap lists product photos");
+        assert((await browser().request("/")).text.includes('"@type":"OnlineStore"'), "store details on homepage");
+        assert((await browser().request("/product/plain-ring")).text.includes('"@type":"BreadcrumbList"'), "breadcrumbs on product page");
+      });
+
+      await t.step("collection texts are edited in the admin and shown on the collection", async () => {
+        const saved = await adminAfterRestart.request("/admin/collections", { method: "POST", form: { intro_jewellery: "Handpicked pieces for every day.", text_jewellery: "First paragraph.\n\nSecond paragraph." } });
+        assertEquals(saved.location, "/admin/collections?saved=1", "saved");
+        const collection = await browser().request("/collections/jewellery");
+        assert(collection.text.includes("Handpicked pieces for every day."), "custom introduction");
+        assert(collection.text.includes("<p>First paragraph.</p><p>Second paragraph.</p>"), "longer text in paragraphs");
+      });
+
+      await t.step("a renamed product keeps its old address working", async () => {
+        const form = new FormData();
+        for (const [key, value] of Object.entries({ name: "Gold Ring", price: 1000, stock: await stockOf(adminAfterRestart, ids.ring) })) form.set(key, String(value));
+        const saved = await adminAfterRestart.request(`/admin/products/edit/${ids.ring}`, { method: "POST", form });
+        assertEquals(saved.location, "/admin/products", "saved");
+        const old = await browser().request("/product/plain-ring");
+        assertEquals(old.status, 301, "old address redirects");
+        assertEquals(old.location, "/product/gold-ring", "to the new address");
       });
 
       await t.step("backup downloads a database file", async () => {

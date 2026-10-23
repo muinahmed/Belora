@@ -119,6 +119,18 @@ const schema = [
     updated_at INTEGER NOT NULL
   )`,
 
+  // A product's earlier web addresses, so links to a renamed product still lead to it.
+  `CREATE TABLE IF NOT EXISTS product_slug_history (
+    slug TEXT PRIMARY KEY,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE
+  )`,
+
+  // Small texts the admin can edit, such as each collection's introduction.
+  `CREATE TABLE IF NOT EXISTS site_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  )`,
+
   `CREATE TABLE IF NOT EXISTS admin_sessions (
     token TEXT PRIMARY KEY,
     username TEXT NOT NULL,
@@ -147,6 +159,8 @@ addColumnIfMissing("order_items", "variant_id", "variant_id INTEGER");
 addColumnIfMissing("orders", "public_token", "public_token TEXT");
 // bKash / Nagad transaction ID the customer entered at checkout.
 addColumnIfMissing("orders", "transaction_id", "transaction_id TEXT");
+// Extra words the shop search matches (Bangla, Banglish, other spellings); not displayed.
+addColumnIfMissing("products", "search_keywords", "search_keywords TEXT");
 addColumnIfMissing("products", "skin_concern", "skin_concern TEXT");
 addColumnIfMissing("products", "ingredients", "ingredients TEXT");
 addColumnIfMissing("products", "how_to_use", "how_to_use TEXT");
