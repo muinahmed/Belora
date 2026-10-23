@@ -174,6 +174,19 @@ Deno.test({
         ids.sale = productIdByName(list.text, "Sale Lipstick");
       });
 
+      await t.step("product pages work for products outside the three collections", async () => {
+        // A category that matches no collection, holding a single product: "You may also like"
+        // has to be topped up from the rest of the shop.
+        await admin.request("/admin/categories", { method: "POST", form: { name: "Gift Sets" } });
+        const form = await admin.request("/admin/products/add");
+        const categoryId = form.text.match(/<option value="(\d+)"[^>]*>Gift Sets<\/option>/)?.[1];
+        assert(categoryId, "new category offered on the product form");
+        await addProduct(admin, { name: "Gift Box", price: 1500, stock: 2, category_id: categoryId });
+        const list = await browser().request("/products");
+        const page = await browser().request(`/product/${productIdByName(list.text, "Gift Box")}`);
+        assertEquals(page.status, 200, "product page status");
+      });
+
       await t.step("sale page filters list only sale products' shades", async () => {
         const sale = await browser().request("/products?sale=1");
         assert(sale.text.includes('value="Mauve Dream"'), "sale shade offered");

@@ -258,7 +258,9 @@ export function relatedProducts(productId, categoryId, limit = 4, collectionIds 
     ORDER BY p.stock > 0 DESC, p.id DESC LIMIT ?`, [productId, categoryId, categoryId, limit]).map(toCard);
   if (picked.length >= limit) return picked;
   const exclude = [productId, ...picked.map(product => product.id)];
-  const sameCollection = collectionIds.length ? `p.category_id IN (${inList(collectionIds)})` : "0";
+  // Without a collection the sort term must still be an expression: a bare "0" in ORDER BY
+  // means "column 0", which SQLite rejects.
+  const sameCollection = collectionIds.length ? `p.category_id IN (${inList(collectionIds)})` : "(1 = 0)";
   const extra = db.query(`${CARD_SQL} WHERE p.is_active = 1 AND p.id NOT IN (${inList(exclude)})
     ORDER BY ${sameCollection} DESC, p.stock > 0 DESC, p.id DESC LIMIT ?`, [...exclude, ...collectionIds, limit - picked.length]).map(toCard);
   return [...picked, ...extra];
