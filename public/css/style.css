@@ -653,6 +653,10 @@ td a:not(.btn):hover { text-decoration: underline; }
     margin-inline: calc(-1 * var(--gutter)); padding-inline: var(--gutter); scroll-padding-inline: var(--gutter);
   }
   .collection-tiles::-webkit-scrollbar, .shelf .product-grid::-webkit-scrollbar, .sale-banner .product-grid::-webkit-scrollbar { display: none; }
+  /* Swipe rows move sideways only: nothing inside (such as a card rising in) may make them
+     scroll up and down, so cards here fade in without the upward slide. */
+  .collection-tiles, .shelf .product-grid, .sale-banner .product-grid { overflow-y: hidden; overscroll-behavior-x: contain; }
+  .collection-tiles > .reveal, .shelf .product-grid > .reveal, .sale-banner .product-grid > .reveal { transform: none; }
   .collections { padding-top: 28px; }
   .collection-tile { flex: 0 0 64%; aspect-ratio: 4 / 5; scroll-snap-align: start; }
   .tile-text { padding: 48px 16px 16px; }
