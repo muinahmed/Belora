@@ -315,6 +315,36 @@ Deno.test({
         assertEquals(old.location, "/product/gold-ring", "to the new address");
       });
 
+      await t.step("admin removes single photos and chooses the main photo", async () => {
+        const photo = (name) => new File([PHOTO], name, { type: "image/jpeg" });
+        const form = new FormData();
+        for (const [key, value] of Object.entries({ name: "Photo Palette", price: 1200, stock: 4, variant_name: "Shade", variant_value: "Peach\nBerry", variant_stock: "2\n2" })) form.set(key, String(value));
+        for (const name of ["a.jpg", "b.jpg", "c.jpg"]) form.append("images", photo(name));
+        for (const name of ["peach.jpg", "berry.jpg"]) form.append("variant_images", photo(name));
+        assertEquals((await adminAfterRestart.request("/admin/products/add", { method: "POST", form })).location, "/admin/products", "product saved");
+        const id = productIdByName((await adminAfterRestart.request("/admin/products")).text, "Photo Palette");
+
+        const editPage = (await adminAfterRestart.request(`/admin/products/edit/${id}`)).text;
+        const gallery = [...editPage.matchAll(/<img src="(\/uploads\/products\/[^"]+)" alt="Photo \d+">[\s\S]*?name="main_image" value="(\d+)"/g)].map(([, path, imageId]) => ({ path, imageId }));
+        const shadeIds = [...editPage.matchAll(/name="remove_variant_image" value="(\d+)"/g)].map(match => match[1]);
+        assertEquals(gallery.length, 3, "three gallery photos on the edit page");
+        assertEquals(shadeIds.length, 2, "two shade photos on the edit page");
+
+        const update = new FormData();
+        for (const [key, value] of Object.entries({ name: "Photo Palette", price: 1200, stock: 4, variant_name: "Shade", variant_value: "Peach\nBerry", variant_stock: "2\n2", main_image: gallery[2].imageId, remove_image: gallery[1].imageId, remove_variant_image: shadeIds[0] })) update.set(key, String(value));
+        update.append("images", photo("d.jpg"));
+        assertEquals((await adminAfterRestart.request(`/admin/products/edit/${id}`, { method: "POST", form: update })).location, "/admin/products", "changes saved");
+
+        const after = (await adminAfterRestart.request(`/admin/products/edit/${id}`)).text;
+        const afterGallery = [...after.matchAll(/<img src="(\/uploads\/products\/[^"]+)" alt="Photo \d+">[\s\S]*?name="main_image" value="(\d+)"( checked)?/g)];
+        assertEquals(afterGallery.length, 3, "one removed and one added: still three photos");
+        assert(!after.includes(gallery[1].path), "removed photo is gone from the gallery");
+        assertEquals(afterGallery.find(match => match[3])?.[2], gallery[2].imageId, "chosen photo is the main photo");
+        assertEquals([...after.matchAll(/name="remove_variant_image"/g)].length, 1, "one shade photo left");
+        const fileGone = await Deno.stat(`${dataDir}${gallery[1].path}`).then(() => false, () => true);
+        assert(fileGone, "removed photo's file is deleted from the server");
+      });
+
       await t.step("backup downloads a database file", async () => {
         const backup = await adminAfterRestart.request("/admin/backup");
         assertEquals(backup.status, 200, "status");

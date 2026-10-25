@@ -1061,3 +1061,12 @@ img.img-fade.is-loaded { opacity: 1; }
   .hero-title .word, .is-loading { animation: none; }
   img.img-fade { opacity: 1; }
 }
+
+/* Admin product form: current photos with "Main photo" and "Remove" controls. */
+.gallery-manager { display: grid; gap: 10px; }
+.gallery-manager-title { font-weight: 500; font-size: .92rem; }
+.design-preview-list figure { display: grid; gap: 4px; }
+.photo-main, .photo-remove { display: flex; align-items: center; gap: 6px; font-size: .8rem; font-weight: 400; cursor: pointer; }
+.photo-main input, .photo-remove input { margin: 0; accent-color: var(--olive); }
+.photo-remove { color: var(--sale); }
+.design-preview-list figure:has(.photo-remove input:checked) img { opacity: .35; outline: 2px solid var(--sale); outline-offset: -2px; }
