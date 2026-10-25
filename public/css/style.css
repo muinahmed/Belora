@@ -1070,3 +1070,13 @@ img.img-fade.is-loaded { opacity: 1; }
 .photo-main input, .photo-remove input { margin: 0; accent-color: var(--olive); }
 .photo-remove { color: var(--sale); }
 .design-preview-list figure:has(.photo-remove input:checked) img { opacity: .35; outline: 2px solid var(--sale); outline-offset: -2px; }
+
+/* Text typed in the admin (product description and details): paragraphs, bullet lists,
+   sub-lists and small headings, laid out as it was typed. */
+.rich-text { white-space: normal; }
+.rich-text > * + * { margin-top: 12px; }
+.rich-text ul { margin: 0; padding-left: 1.2em; list-style: disc; }
+.rich-text ul ul { margin-top: 4px; list-style: circle; }
+.rich-text li + li { margin-top: 6px; }
+.rich-text li::marker { color: var(--rust); }
+.rich-text .text-heading { font-family: var(--sans); font-size: .82rem; font-weight: 600; letter-spacing: .08em; color: var(--charcoal); margin-top: 20px; }
