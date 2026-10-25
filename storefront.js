@@ -470,6 +470,58 @@ export function pagination(page, pages, hrefFor) {
   </nav>`;
 }
 
+// Turns text typed in the admin into simple HTML, keeping how it was laid out:
+// - blank lines separate paragraphs; single line breaks are kept
+// - lines starting with a bullet (· • ● ▪ ◦ - * –) become a list; indented bullets
+//   become a sub-list under the bullet above
+// - a short line in CAPITALS on its own ("CATEGORY") becomes a small heading
+// Everything is escaped.
+const BULLET = /^[·•●▪◦‣∙*\-–]\s+/;
+
+export function formatText(text = "") {
+  const blocks = String(text).replace(/\r\n?/g, "\n").split(/\n[ \t\u00a0]*\n/);
+  return blocks.map(block => {
+    const lines = block.split("\n").filter(line => line.trim());
+    let html = "";
+    let paragraph = [];
+    let list = null; // { baseIndent, items: [{ text, children: [] }] }
+    const indentOf = (line) => line.match(/^[ \t\u00a0]*/)[0].replace(/\t/g, "    ").length;
+    const flushParagraph = () => {
+      if (paragraph.length) html += `<p>${paragraph.map(escapeHtml).join("<br>")}</p>`;
+      paragraph = [];
+    };
+    const flushList = () => {
+      if (list) {
+        html += `<ul>${list.items.map(item => `<li>${escapeHtml(item.text)}${item.children.length ? `<ul>${item.children.map(child => `<li>${escapeHtml(child)}</li>`).join("")}</ul>` : ""}</li>`).join("")}</ul>`;
+      }
+      list = null;
+    };
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const indent = indentOf(line);
+      if (BULLET.test(trimmed)) {
+        flushParagraph();
+        const itemText = trimmed.replace(BULLET, "");
+        if (list && indent > list.baseIndent && list.items.length) list.items[list.items.length - 1].children.push(itemText);
+        else {
+          if (!list) list = { baseIndent: indent, items: [] };
+          list.items.push({ text: itemText, children: [] });
+        }
+      } else if (trimmed.length <= 40 && (trimmed.match(/\p{Lu}/gu) ?? []).length >= 3 && trimmed === trimmed.toUpperCase() && !/[.!?]$/.test(trimmed)) {
+        flushParagraph();
+        flushList();
+        html += `<h3 class="text-heading">${escapeHtml(trimmed)}</h3>`;
+      } else {
+        flushList();
+        paragraph.push(trimmed);
+      }
+    }
+    flushParagraph();
+    flushList();
+    return html;
+  }).join("");
+}
+
 // Category names are typed in the admin and are sometimes lowercase ("blush").
 export function displayName(name = "") {
   const text = String(name).trim();

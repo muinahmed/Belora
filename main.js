@@ -4,7 +4,7 @@ import {
   BRAND, COLLECTIONS, DELIVERY_CHARGES, PAGE_SIZE, RETURNS_POLICY, SORTS, breadcrumbs, categoryById, categoryScope,
   categoriesWithCounts, collectionMap, countActive, effectivePrice, escapeHtml,
   getCollection, icons, listProducts, listingFacets, pagination, productGrid, relatedProducts,
-  displayName, popularProducts, productPath, shelf, shelfSection, siteFooter, siteHeader, taka, SHOP_WHATSAPP_NUMBER
+  displayName, formatText, popularProducts, productPath, shelf, shelfSection, siteFooter, siteHeader, taka, SHOP_WHATSAPP_NUMBER
 } from "./storefront.js";
 
 const publicDir = "./public";
@@ -1275,12 +1275,11 @@ ${entries.map(entry => `<url><loc>${escapeHtml(entry.loc)}</loc>${entry.lastmod 
       const stockText = product.stock < 1 ? "Sold out" : product.stock <= 5 ? `Only ${product.stock} left` : "In stock";
       const stockClass = product.stock < 1 ? "is-out" : product.stock <= 5 ? "is-low" : "is-in";
 
-      const paragraphs = (text) => String(text).split(/\n\s*\n/).map(part => `<p>${escapeHtml(part.trim())}</p>`).join("");
       const detailSections = [
         ["Ingredients", product.ingredients], ["How to use", product.howToUse], ["Skin concern", product.skinConcern],
         ["Material", product.material], ["Size", product.sizeInfo], ["Care", product.careInstructions]
       ].filter(([, value]) => value).map(([label, value], index) =>
-        `<details ${index === 0 ? "open" : ""}><summary>${label}</summary><div class="pd-detail-body">${paragraphs(value)}</div></details>`
+        `<details ${index === 0 ? "open" : ""}><summary>${label}</summary><div class="pd-detail-body rich-text">${formatText(value)}</div></details>`
       ).join("");
 
       const collections = collectionMap();
@@ -1327,7 +1326,7 @@ ${entries.map(entry => `<url><loc>${escapeHtml(entry.loc)}</loc>${entry.lastmod 
         STICKY_PRICE: taka(product.unitPrice),
         STOCK_CLASS: stockClass,
         STOCK_TEXT: stockText,
-        DESCRIPTION: product.description ? `<div class="pd-desc">${paragraphs(product.description)}</div>` : "",
+        DESCRIPTION: product.description ? `<div class="pd-desc rich-text">${formatText(product.description)}</div>` : "",
         PRODUCT_ID: String(product.id),
         VARIANT: variantSelector,
         STOCK: String(Math.max(product.stock, 1)),
