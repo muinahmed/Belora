@@ -374,7 +374,7 @@ function getProduct(id) {
   `, [id]);
 
   const images = db.query(`
-  SELECT image_path, is_main
+  SELECT image_path, is_main, id
   FROM product_images
   WHERE product_id = ?
   ORDER BY is_main DESC, id ASC
@@ -404,9 +404,10 @@ function getProduct(id) {
     // The price customers pay: the sale price while it is valid, else the regular price.
     unitPrice: effectivePrice(row[5], row[17]),
     images: images.map(image => ({
-  path: image[0],
-  isMain: Number(image[1]) === 1
-})),
+      path: image[0],
+      isMain: Number(image[1]) === 1,
+      id: Number(image[2])
+    })),
     variants: variants.map(v => ({
       id: v[0],
       name: v[1],
@@ -560,12 +561,37 @@ function parentCategoryOptions(selectedId = null, excludeId = null) {
   ).join("");
 }
 
+// Current shade photos on the edit form, each with a "Remove photo" box.
 function designImagePreview(variants = []) {
   const designs = variants.filter(variant => variant.imagePath);
   if (!designs.length) return "";
   return `<div class="design-preview-list">${designs.map(variant => `
-    <figure><img src="${variant.imagePath}" alt="${escapeHtml(variant.value)}"><figcaption>${escapeHtml(variant.value)}</figcaption></figure>
+    <figure><img src="${escapeHtml(variant.imagePath)}" alt="${escapeHtml(variant.value)}"><figcaption>${escapeHtml(variant.value)}</figcaption>
+      <label class="photo-remove"><input type="checkbox" name="remove_variant_image" value="${variant.id}"> Remove photo</label>
+    </figure>
   `).join("")}</div>`;
+}
+
+// Current gallery photos on the edit form: choose the main photo, or tick photos to remove.
+function galleryManager(images = []) {
+  if (!images.length) return "";
+  return `<div class="gallery-manager">
+    <p class="gallery-manager-title">Current gallery photos</p>
+    <div class="design-preview-list">${images.map((image, index) => `
+      <figure><img src="${escapeHtml(image.path)}" alt="Photo ${index + 1}">
+        <label class="photo-main"><input type="radio" name="main_image" value="${image.id}" ${image.isMain ? "checked" : ""}> Main photo</label>
+        <label class="photo-remove"><input type="checkbox" name="remove_image" value="${image.id}"> Remove</label>
+      </figure>`).join("")}
+    </div>
+  </div>`;
+}
+
+// Deletes an uploaded photo file once no gallery photo or shade uses it any more.
+async function removeUnusedUpload(webPath) {
+  const match = String(webPath ?? "").match(/^\/uploads\/products\/([\w-]+\.(?:jpg|jpeg|png|webp|gif))$/);
+  if (!match) return;
+  const stillUsed = db.query("SELECT 1 FROM product_images WHERE image_path = ? UNION ALL SELECT 1 FROM product_variants WHERE image_path = ? LIMIT 1", [webPath, webPath]).length;
+  if (!stillUsed) await Deno.remove(`${uploadDir}/${match[1]}`).catch(() => {});
 }
 
 // Syncs a product's variants with the form. Existing variants are matched by value and
@@ -1995,9 +2021,7 @@ return new Response(
       if (!product) return new Response("Product not found", { status: 404 });
 
       const html = await readView("admin/product-form.html");
-      const currentImage = product.imagePath
-  ? `<img class="current-image" src="${product.imagePath}" alt="${escapeHtml(product.name)}">`
-  : "";
+      const currentImage = galleryManager(product.images);
 
 return new Response(
   page(
@@ -2088,28 +2112,41 @@ return new Response(
         WHERE id = ?
       `, [categoryId, name, slug, description, price, sale.salePrice, sale.featured, sku, stock, skinConcern, ingredients, howToUse, material, sizeInfo, careInstructions, searchKeywords, id]);
 
+      // Shade photos ticked "Remove photo" are cleared, unless a new photo was chosen for that shade.
+      const removeVariantImages = new Set(form.getAll("remove_variant_image").map(Number));
+      const clearedVariantPaths = [];
+      for (const entry of variantPlan.planned) {
+        if (entry.old && removeVariantImages.has(entry.old.id) && !(entry.file instanceof File && entry.file.size > 0)) {
+          if (entry.old.imagePath) clearedVariantPaths.push(entry.old.imagePath);
+          entry.old = { ...entry.old, imagePath: "" };
+        }
+      }
       await saveDesignVariants(id, variantPlan);
 
-      for (const [index, image] of images.entries()) {
-  const uploaded = await saveUploadedImage(image);
+      // Gallery: ticked photos are removed, new uploads are added, and the chosen photo
+      // (or else the first remaining one) is the main photo.
+      const removeImages = new Set(form.getAll("remove_image").map(Number));
+      const removedPaths = product.images.filter(image => removeImages.has(image.id)).map(image => image.path);
+      for (const imageId of removeImages) {
+        db.query("DELETE FROM product_images WHERE id = ? AND product_id = ?", [imageId, id]);
+      }
+      for (const image of images) {
+        const uploaded = await saveUploadedImage(image);
+        if (uploaded) {
+          db.query("INSERT INTO product_images (product_id, image_path, is_main) VALUES (?, ?, 0)", [id, uploaded.webPath]);
+        }
+      }
+      const remaining = db.query("SELECT id FROM product_images WHERE product_id = ? ORDER BY is_main DESC, id ASC", [id]).map(([imageId]) => Number(imageId));
+      const chosenMain = Number(form.get("main_image"));
+      const mainId = remaining.includes(chosenMain) ? chosenMain : remaining[0];
+      if (mainId) {
+        db.query("UPDATE product_images SET is_main = CASE WHEN id = ? THEN 1 ELSE 0 END WHERE product_id = ?", [mainId, id]);
+      }
+      const deletedShadePaths = variantPlan.unmatched.map(variant => variant.imagePath).filter(Boolean);
+      for (const path of [...removedPaths, ...clearedVariantPaths, ...deletedShadePaths]) await removeUnusedUpload(path);
 
-  if (uploaded) {
-    if (index === 0) {
-      db.query(
-        "DELETE FROM product_images WHERE product_id = ?",
-        [id]
-      );
+      return redirect("/admin/products");
     }
-
-    db.query(
-      "INSERT INTO product_images (product_id, image_path, is_main) VALUES (?, ?, ?)",
-      [id, uploaded.webPath, index === 0 ? 1 : 0]
-    );
-  }
-}
-
-return redirect("/admin/products");
-}
 
     if (url.pathname.startsWith("/admin/products/delete/") && request.method === "POST") {
       const denied = adminGuard(request);

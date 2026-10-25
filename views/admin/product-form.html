@@ -109,11 +109,12 @@
       {{CURRENT_DESIGN_IMAGES}}
     </div>
 
-    <label>General product gallery images
-  <input type="file" name="images" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
-    </label>
-
     {{CURRENT_IMAGE}}
+
+    <label>Add gallery photos
+      <input type="file" name="images" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
+    </label>
+    <p class="muted">New photos are added to the gallery. On a new product, the first photo is the main photo; afterwards, choose the main photo or remove photos above.</p>
 
     <p class="muted photo-status" aria-live="polite">Large photos are made smaller automatically before upload, so they load fast for customers.</p>
     <button class="btn" type="submit">Save product</button>
