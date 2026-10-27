@@ -1080,3 +1080,20 @@ img.img-fade.is-loaded { opacity: 1; }
 .rich-text li + li { margin-top: 6px; }
 .rich-text li::marker { color: var(--rust); }
 .rich-text .text-heading { font-family: var(--sans); font-size: .82rem; font-weight: 600; letter-spacing: .08em; color: var(--charcoal); margin-top: 20px; }
+
+/* Homepage banner in 3D. /js/hero3d.js draws floating makeup and jewellery on the canvas and
+   adds .is-3d once the first frame is ready; the photo then fades out. Without WebGL, with
+   data saver, or for visitors who ask for less motion, the photo banner stays as it is. */
+.hero-3d { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; transition: opacity 1.2s ease; pointer-events: none; }
+.hero picture { transition: opacity 1.2s ease; }
+.hero.is-3d { background: radial-gradient(ellipse 60% 75% at 74% 48%, #FFF9F2 0%, var(--ivory) 35%, var(--cream) 70%, var(--cream-deep) 100%); }
+.hero.is-3d .hero-3d { opacity: 1; }
+.hero.is-3d picture { opacity: 0; }
+@media (max-width: 900px) and (min-width: 621px) {
+  /* Tablet banner: the picture sits above the copy, so the scene takes its place. */
+  .hero-3d { inset: 0 0 auto; height: auto; aspect-ratio: 5 / 3; }
+  .hero.is-3d { background: linear-gradient(180deg, var(--cream) 0%, var(--ivory) 60%); }
+}
+@media (max-width: 620px) {
+  .hero.is-3d { background: radial-gradient(ellipse 90% 55% at 50% 30%, #FFF9F2 0%, var(--ivory) 45%, var(--cream) 100%); }
+}
