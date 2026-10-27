@@ -785,7 +785,7 @@ async function renderCheckout(request, details, { error = "", values = {}, statu
   }), { noindex: true }), status);
 }
 
-// The stylesheet and storefront scripts are read once. Their links carry a content hash, so
+// The stylesheet and storefront script are read once. Their links carry a content hash, so
 // browsers can keep them for a year and still fetch the new file straight after a deploy.
 async function contentVersion(text) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -795,8 +795,6 @@ const STYLESHEET = await Deno.readTextFile(`${publicDir}/css/style.css`);
 const STYLESHEET_VERSION = await contentVersion(STYLESHEET);
 const STORE_SCRIPT = await Deno.readTextFile(`${publicDir}/js/store.js`);
 const STORE_SCRIPT_VERSION = await contentVersion(STORE_SCRIPT);
-const HERO_SCRIPT = await Deno.readTextFile(`${publicDir}/js/hero3d.js`);
-const HERO_SCRIPT_VERSION = await contentVersion(HERO_SCRIPT);
 
 // Inline scripts and styles are part of the pages, so they stay allowed; everything else
 // must come from this site or Google Fonts, and no other site may frame these pages.
@@ -846,10 +844,9 @@ async function handleRequest(request, info) {
       });
     }
 
-    if (url.pathname === "/js/store.js" || url.pathname === "/js/hero3d.js") {
-      const [script, version] = url.pathname === "/js/store.js" ? [STORE_SCRIPT, STORE_SCRIPT_VERSION] : [HERO_SCRIPT, HERO_SCRIPT_VERSION];
-      const versioned = url.searchParams.get("v") === version;
-      return new Response(script, {
+    if (url.pathname === "/js/store.js") {
+      const versioned = url.searchParams.get("v") === STORE_SCRIPT_VERSION;
+      return new Response(STORE_SCRIPT, {
         headers: {
           "content-type": "text/javascript; charset=utf-8",
           "cache-control": versioned ? "public, max-age=31536000, immutable" : "public, max-age=300"
@@ -988,7 +985,6 @@ ${entries.map(entry => `<url><loc>${escapeHtml(entry.loc)}</loc>${entry.lastmod 
       return html(page("Makeup, skincare and jewellery", fill(view, {
         HEADER: storeHeader(request, "home"),
         FOOTER: storeFooter(),
-        HERO_SCRIPT: `/js/hero3d.js?v=${HERO_SCRIPT_VERSION}`,
         COLLECTION_TILES: tiles,
         NEW_ARRIVALS: shelfSection("New arrivals", newArrivals, "/products?sort=newest", "View all"),
         SALE_BANNER: saleBanner,
