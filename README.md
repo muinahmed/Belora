@@ -46,7 +46,7 @@ Online shop for makeup, skincare and jewellery in Bangladesh, with cash on deliv
 ### For the shop owner (admin)
 - **Dashboard:** counts, low stock, 30-day analytics (views, bag adds, checkouts started, orders), and **Download backup**.
 - **Products:** add, edit and delete; search; low-stock filter; sale price; featured flag; shades or designs with photo and stock each; search keywords (any language). Photos are shrunk automatically before upload.
-- **Categories:** main categories and sub-categories.
+- **Categories:** main categories and sub-categories. **Edit or move** on each category renames it (its web address stays the same) and moves all its products to another category in one step. A category with products can't be deleted until they're moved.
 - **Collections:** edit each collection's introduction and its longer "About" text.
 - **Orders:** filter by status and date (Today / 7 days / 30 days / This month, in Bangladesh time); search by order number, name, phone or transaction ID; totals for the filtered orders; change status; print a packing slip; message the customer on WhatsApp; **download for Excel (CSV)**; delete cancelled orders.
 

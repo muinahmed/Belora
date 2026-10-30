@@ -554,6 +554,19 @@ function categoryOptions(selectedId = null) {
   ).join("");
 }
 
+// Every category except one, for "move products to".
+function categoryOptionsExcept(excludeId) {
+  const rows = db.query("SELECT id, name, parent_id FROM categories ORDER BY CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END, name");
+  return rows.filter(([id]) => Number(id) !== Number(excludeId)).map(([id, name, parentId]) =>
+    `<option value="${id}">${parentId ? "— " : ""}${escapeHtml(name)}</option>`
+  ).join("");
+}
+
+// Back to the category page with a message ("notice" = done, "problem" = not done).
+function categoryNotice(kind, message) {
+  return `/admin/categories?${kind}=${encodeURIComponent(message)}`;
+}
+
 function parentCategoryOptions(selectedId = null, excludeId = null) {
   const rows = db.query("SELECT id, name FROM categories WHERE parent_id IS NULL ORDER BY name");
   return rows.filter(([id]) => Number(id) !== Number(excludeId)).map(([id, name]) =>
@@ -2200,13 +2213,18 @@ return new Response(
       if (denied) return denied;
 
       const rows = db.query(`
-        SELECT c.id, c.name, c.slug, c.description, c.parent_id, p.name
+        SELECT c.id, c.name, c.slug, c.description, c.parent_id, p.name,
+          (SELECT COUNT(*) FROM products WHERE category_id = c.id)
         FROM categories c LEFT JOIN categories p ON p.id = c.parent_id
         ORDER BY CASE WHEN c.parent_id IS NULL THEN 0 ELSE 1 END, c.name
       `);
-      const list = rows.map(([id, name, slug, description, parentId]) => `
+      const list = rows.map(([id, name, slug, description, parentId, , productCount]) => {
+        const count = Number(productCount);
+        const noun = count === 1 ? "product" : "products";
+        return `
         <tr>
           <td class="cell-title" data-label="">${escapeHtml(name)}</td>
+          <td data-label="Products">${count}</td>
           <td data-label="Parent">
             <form class="inline-form" method="POST" action="/admin/categories/parent/${id}">
               <select name="parent_id" aria-label="Parent category for ${escapeHtml(name)}">
@@ -2216,17 +2234,36 @@ return new Response(
             </form>
           </td>
           <td data-label="Slug">${escapeHtml(slug)}</td>
-          <td data-label="Description">${escapeHtml(description ?? "")}</td>
           <td class="cell-actions" data-label="">
-            <form method="POST" action="/admin/categories/delete/${id}" onsubmit="return confirm('Delete this category?')">
-              <button class="danger-button" type="submit">Delete</button>
-            </form>
+            <details class="cat-edit">
+              <summary>Edit or move</summary>
+              <form class="cat-form" method="POST" action="/admin/categories/update/${id}">
+                <label>Name<input name="name" value="${escapeHtml(name)}" maxlength="80" required></label>
+                <label>Description<textarea name="description" rows="2">${escapeHtml(description ?? "")}</textarea></label>
+                <p class="muted">The web address stays the same. If the new name contains a word for another collection, the category moves to that collection.</p>
+                <button class="btn btn-small" type="submit">Save name</button>
+              </form>
+              ${count ? `<form class="cat-form" method="POST" action="/admin/categories/move/${id}">
+                <label>Move these ${count} ${noun} to
+                  <select name="target_id" required><option value="">Choose a category</option>${categoryOptionsExcept(id)}</select>
+                </label>
+                <button class="btn btn-small" type="submit">Move ${count} ${noun}</button>
+              </form>
+              <p class="muted">Move the products before you can delete this category.</p>` : `
+              <form method="POST" action="/admin/categories/delete/${id}" onsubmit="return confirm('Delete this category?')">
+                <button class="danger-button" type="submit">Delete category</button>
+              </form>`}
+            </details>
           </td>
-        </tr>
-      `).join("");
+        </tr>`;
+      }).join("");
 
+      const notice = url.searchParams.get("notice") ?? "";
+      const problem = url.searchParams.get("problem") ?? "";
       const content = `
         <div class="page-title"><p class="eyebrow">Catalogue</p><h1>Categories</h1></div>
+        ${notice ? `<p class="success-box" role="status">${escapeHtml(notice)}</p>` : ""}
+        ${problem ? `<p class="error-box" role="alert">${escapeHtml(problem)}</p>` : ""}
         <div class="two-column">
           <section class="panel">
             <h2>Add category</h2>
@@ -2242,7 +2279,7 @@ return new Response(
           <section class="panel">
             <h2>Existing categories</h2>
             <div class="table-wrap"><table>
-              <thead><tr><th>Name</th><th>Parent</th><th>Slug</th><th>Description</th><th></th></tr></thead>
+              <thead><tr><th>Name</th><th>Products</th><th>Parent</th><th>Slug</th><th></th></tr></thead>
               <tbody>${list || `<tr><td colspan="5">No categories yet.</td></tr>`}</tbody>
             </table></div>
           </section>
@@ -2296,11 +2333,54 @@ return new Response(
       return redirect("/admin/categories");
     }
 
+    // Rename a category. Its web address (slug) is kept, so existing links still work.
+    if (url.pathname.startsWith("/admin/categories/update/") && request.method === "POST") {
+      const denied = adminGuard(request);
+      if (denied) return denied;
+
+      const id = Number(url.pathname.split("/").pop());
+      if (!db.query("SELECT id FROM categories WHERE id = ?", [id]).length) {
+        return new Response("Category not found.", { status: 404 });
+      }
+      const form = await request.formData();
+      const name = form.get("name")?.toString().trim() ?? "";
+      const description = form.get("description")?.toString().trim().slice(0, 500) ?? "";
+      if (!name || name.length > 80) return redirect(categoryNotice("problem", "Please enter a category name of up to 80 characters."));
+      if (db.query("SELECT id FROM categories WHERE name = ? AND id <> ?", [name, id]).length) {
+        return redirect(categoryNotice("problem", `Another category is already called "${name}".`));
+      }
+      db.query("UPDATE categories SET name = ?, description = ? WHERE id = ?", [name, description, id]);
+      return redirect(categoryNotice("notice", "Category saved."));
+    }
+
+    // Move every product in one category to another, in one step.
+    if (url.pathname.startsWith("/admin/categories/move/") && request.method === "POST") {
+      const denied = adminGuard(request);
+      if (denied) return denied;
+
+      const id = Number(url.pathname.split("/").pop());
+      const source = db.query("SELECT name FROM categories WHERE id = ?", [id])[0];
+      if (!source) return new Response("Category not found.", { status: 404 });
+      const form = await request.formData();
+      const targetId = Number(form.get("target_id")) || null;
+      const target = targetId && targetId !== id ? db.query("SELECT name FROM categories WHERE id = ?", [targetId])[0] : null;
+      if (!target) return redirect(categoryNotice("problem", "Please choose the category to move the products to."));
+      const moved = Number(db.query("SELECT COUNT(*) FROM products WHERE category_id = ?", [id])[0][0]);
+      if (!moved) return redirect(categoryNotice("problem", `There are no products in "${source[0]}" to move.`));
+      db.query("UPDATE products SET category_id = ?, updated_at = CURRENT_TIMESTAMP WHERE category_id = ?", [targetId, id]);
+      return redirect(categoryNotice("notice", `Moved ${moved} ${moved === 1 ? "product" : "products"} from "${source[0]}" to "${target[0]}".`));
+    }
+
+    // A category that still has products can't be deleted: they would silently lose their category.
     if (url.pathname.startsWith("/admin/categories/delete/") && request.method === "POST") {
       const denied = adminGuard(request);
       if (denied) return denied;
 
       const id = Number(url.pathname.split("/").pop());
+      const count = Number(db.query("SELECT COUNT(*) FROM products WHERE category_id = ?", [id])[0][0]);
+      if (count) {
+        return redirect(categoryNotice("problem", `This category still has ${count} ${count === 1 ? "product" : "products"}. Move them to another category first.`));
+      }
       db.query("DELETE FROM categories WHERE id = ?", [id]);
       return redirect("/admin/categories");
     }
