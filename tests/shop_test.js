@@ -345,6 +345,43 @@ Deno.test({
         assert(fileGone, "removed photo's file is deleted from the server");
       });
 
+      await t.step("admin moves products between categories, renames, and keeps products from being orphaned", async () => {
+        const categoryIdByName = (html, name) => {
+          const match = html.match(new RegExp(`data-label="">${name}</td>[\\s\\S]*?/admin/categories/update/(\\d+)`));
+          assert(match, `category "${name}" listed`);
+          return Number(match[1]);
+        };
+        await adminAfterRestart.request("/admin/categories", { method: "POST", form: { name: "Rings" } });
+        await adminAfterRestart.request("/admin/categories", { method: "POST", form: { name: "Finger Rings" } });
+        const listing = (await adminAfterRestart.request("/admin/categories")).text;
+        const ringsId = categoryIdByName(listing, "Rings");
+        const fingerId = categoryIdByName(listing, "Finger Rings");
+        await addProduct(adminAfterRestart, { name: "Ring Pair", price: 600, stock: 3, category_id: ringsId });
+        await addProduct(adminAfterRestart, { name: "Ring Duo", price: 650, stock: 3, category_id: ringsId });
+
+        const shown = (await adminAfterRestart.request("/admin/categories")).text;
+        assert(/data-label="Products">2</.test(shown), "Rings shows its product count");
+
+        const moved = await adminAfterRestart.request(`/admin/categories/move/${ringsId}`, { method: "POST", form: { target_id: fingerId } });
+        assert(decodeURIComponent(moved.location).includes('Moved 2 products from "Rings" to "Finger Rings"'), `move notice, got ${moved.location}`);
+        const productId = productIdByName((await adminAfterRestart.request("/admin/products")).text, "Ring Pair");
+        const edit = (await adminAfterRestart.request(`/admin/products/edit/${productId}`)).text;
+        assert(/selected>(— )?Finger Rings</.test(edit), "product now in Finger Rings");
+
+        const renamed = await adminAfterRestart.request(`/admin/categories/update/${fingerId}`, { method: "POST", form: { name: "Stacking Rings", description: "Rings worn together" } });
+        assert(decodeURIComponent(renamed.location).includes("Category saved."), "rename saved");
+        assert((await adminAfterRestart.request("/admin/categories")).text.includes('data-label="">Stacking Rings</td>'), "new name listed");
+        const clash = await adminAfterRestart.request(`/admin/categories/update/${fingerId}`, { method: "POST", form: { name: "Rings" } });
+        assert(decodeURIComponent(clash.location).includes('Another category is already called "Rings"'), "duplicate name refused");
+
+        const guarded = await adminAfterRestart.request(`/admin/categories/delete/${fingerId}`, { method: "POST" });
+        assert(decodeURIComponent(guarded.location).includes("still has 2 products"), "category with products is not deleted");
+        assert((await adminAfterRestart.request("/admin/categories")).text.includes('data-label="">Stacking Rings</td>'), "category still there");
+
+        const emptied = await adminAfterRestart.request(`/admin/categories/delete/${ringsId}`, { method: "POST" });
+        assertEquals(emptied.location, "/admin/categories", "empty category deleted");
+      });
+
       await t.step("backup downloads a database file", async () => {
         const backup = await adminAfterRestart.request("/admin/backup");
         assertEquals(backup.status, 200, "status");
