@@ -1,4 +1,5 @@
 import db from "./database/database.js";
+import { zipArchive } from "./zip.js";
 import { asset, imageVersion, versionImagePaths } from "./assets.js";
 import {
   BRAND, COLLECTIONS, DELIVERY_CHARGES, PAGE_SIZE, RETURNS_POLICY, SORTS, breadcrumbs, categoryById, categoryScope,
@@ -1825,8 +1826,8 @@ ${entries.map(entry => `<url><loc>${escapeHtml(entry.loc)}</loc>${entry.lastmod 
         </section>
         <section class="panel backup-panel">
           <h2>Backup</h2>
-          <p class="muted">Download a copy of your products, categories and orders. Save one before every update, and once a week. Product photos are not included.</p>
-          <p><a class="btn" href="/admin/backup">Download backup</a></p>
+          <p class="muted">Before every update, and before moving to another host, download everything: one zip with the database, all product photos and a restore guide. It contains customer details, so keep it somewhere safe.</p>
+          <p><a class="btn" href="/admin/backup-all">Download everything (zip)</a> <a class="btn btn-light" href="/admin/backup">Database only</a></p>
         </section>
         <div class="admin-grid">
           <a class="action-card" href="/admin/products/add"><h2>Add product</h2><p>Upload a photo, price, stock and variants.</p></a>
@@ -2577,6 +2578,91 @@ return new Response(
         });
       } finally {
         await Deno.remove(folder, { recursive: true }).catch(() => {});
+      }
+    }
+
+    // Everything needed to move to another host, in one zip laid out like DATA_DIR: the
+    // database, every product photo, and a restore guide. Streamed, so large photo folders are fine.
+    if (url.pathname === "/admin/backup-all" && request.method === "GET") {
+      const denied = adminGuard(request);
+      if (denied) return denied;
+
+      const folder = await Deno.makeTempDir({ prefix: "bellora-backup-" });
+      const cleanUp = () => Deno.remove(folder, { recursive: true }).catch(() => {});
+      try {
+        const databasePath = `${folder}/shop.sqlite`;
+        db.exec(`VACUUM INTO '${databasePath.replaceAll("'", "''")}'`);
+        const databaseModified = await Deno.stat(databasePath).then(info => info.mtime ?? new Date(), () => new Date());
+
+        const photos = [];
+        try {
+          for await (const entry of Deno.readDir(uploadDir)) if (entry.isFile) photos.push(entry.name);
+        } catch {
+          // No photos uploaded yet.
+        }
+
+        const guide = [
+          `Bellora BD backup, made ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`,
+          "",
+          "What is inside",
+          "- shop.sqlite: products, categories, orders, customer details, collection texts and settings.",
+          `- uploads/products/: all product and shade photos (${photos.length} files).`,
+          "",
+          "How to restore on a new server",
+          "1. Stop the shop.",
+          "2. Copy shop.sqlite and the uploads folder into your data folder (the folder you set as DATA_DIR).",
+          "   Keep the names exactly as they are: shop.sqlite, and uploads/products/ inside the data folder.",
+          "3. Set the same settings as before (see the README), including ADMIN_USERNAME and ADMIN_PASSWORD.",
+          "4. Start the shop and check the products, photos and order count on the admin dashboard.",
+          "",
+          "Keep this file with the backup. The database contains customers' names, phone numbers and addresses.",
+          ""
+        ].join("\n");
+
+        const entries = [
+          { name: "RESTORE.txt", modified: new Date(), chunks: async function* () { yield new TextEncoder().encode(guide); } },
+          { name: "shop.sqlite", modified: databaseModified, chunks: async function* () {
+            const file = await Deno.open(databasePath, { read: true });
+            for await (const chunk of file.readable) yield chunk;
+          } },
+          ...photos.map(name => ({ name: `uploads/products/${name}`, modified: new Date(), chunks: async function* () {
+            const file = await Deno.open(`${uploadDir}/${name}`, { read: true });
+            for await (const chunk of file.readable) yield chunk;
+          } }))
+        ];
+
+        const archive = zipArchive(entries);
+        const date = new Date().toISOString().slice(0, 10);
+        const body = new ReadableStream({
+          async pull(controller) {
+            try {
+              const next = await archive.next();
+              if (next.done) {
+                controller.close();
+                await cleanUp();
+              } else {
+                controller.enqueue(next.value);
+              }
+            } catch (error) {
+              controller.error(error);
+              await cleanUp();
+            }
+          },
+          async cancel() {
+            await archive.return(undefined);
+            await cleanUp();
+          }
+        });
+        return new Response(body, {
+          headers: {
+            "content-type": "application/zip",
+            "content-disposition": `attachment; filename="bellora-full-backup-${date}.zip"`,
+            "cache-control": "no-store"
+          }
+        });
+      } catch (error) {
+        await cleanUp();
+        throw error;
       }
     }
 
