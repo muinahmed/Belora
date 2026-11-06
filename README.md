@@ -110,7 +110,7 @@ Anything left unset is simply not shown.
 
 **Orders:** Orders → open an order to see the customer, items, payment and transaction ID. Then you can change the status, print a packing slip, or message the customer on WhatsApp. Use the filters at the top and **Download for Excel (CSV)** for courier booking or accounts. The CSV opens correctly in Excel, including Bangla text and phone numbers with their leading 0.
 
-**Backups:** Dashboard → **Download backup**. Do this before every update and at least weekly (see [Data and backups](#data-and-backups)).
+**Backups:** Dashboard → **Download everything (zip)**. It contains the database, every product photo and a restore guide. Do this before every update and before moving hosts (see [Data and backups](#data-and-backups)). The database-only download is still there.
 
 ---
 

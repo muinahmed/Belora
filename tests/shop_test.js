@@ -1,3 +1,4 @@
+import { crc32 } from "../zip.js";
 // End-to-end tests: start the shop against an empty temporary database and drive it over
 // HTTP, the way a browser and the admin would. Run with `deno task test`.
 
@@ -104,6 +105,36 @@ function productIdByName(html, name) {
   const match = html.match(pattern);
   assert(match, `product "${name}" is listed`);
   return Number(match[1]);
+}
+
+// Reads a ZIP written by zip.js and checks each entry's checksum.
+function readZip(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let end = -1;
+  for (let i = bytes.length - 22; i >= 0; i--) {
+    if (view.getUint32(i, true) === 0x06054b50) { end = i; break; }
+  }
+  assert(end >= 0, "archive ends with an end record");
+  const count = view.getUint16(end + 10, true);
+  let position = view.getUint32(end + 16, true);
+  const files = {};
+  for (let n = 0; n < count; n++) {
+    assertEquals(view.getUint32(position, true), 0x02014b50, "central directory entry");
+    const crc = view.getUint32(position + 16, true);
+    const size = view.getUint32(position + 24, true);
+    const nameLength = view.getUint16(position + 28, true);
+    const extraLength = view.getUint16(position + 30, true);
+    const commentLength = view.getUint16(position + 32, true);
+    const localOffset = view.getUint32(position + 42, true);
+    const name = new TextDecoder().decode(bytes.subarray(position + 46, position + 46 + nameLength));
+    assertEquals(view.getUint32(localOffset, true), 0x04034b50, `local header of ${name}`);
+    const dataStart = localOffset + 30 + view.getUint16(localOffset + 26, true) + view.getUint16(localOffset + 28, true);
+    const data = bytes.subarray(dataStart, dataStart + size);
+    assertEquals(crc32(data), crc, `checksum of ${name}`);
+    files[name] = data;
+    position += 46 + nameLength + extraLength + commentLength;
+  }
+  return files;
 }
 
 async function stockOf(admin, productId) {
@@ -380,6 +411,26 @@ Deno.test({
 
         const emptied = await adminAfterRestart.request(`/admin/categories/delete/${ringsId}`, { method: "POST" });
         assertEquals(emptied.location, "/admin/categories", "empty category deleted");
+      });
+
+      await t.step("full backup zip holds the database, every photo and a restore guide, intact", async () => {
+        const raw = await fetch(`${BASE}/admin/backup-all`, {
+          headers: { Cookie: [...adminAfterRestart.cookies].map(([name, value]) => `${name}=${value}`).join("; "), "X-Forwarded-For": "10.250.0.9" }
+        });
+        assertEquals(raw.status, 200, "status");
+        assertEquals(raw.headers.get("content-type"), "application/zip", "content type");
+        const bytes = new Uint8Array(await raw.arrayBuffer());
+        const files = readZip(bytes);
+
+        assert(new TextDecoder().decode(files["shop.sqlite"]).startsWith("SQLite format 3"), "database is a SQLite file");
+        assert(new TextDecoder().decode(files["RESTORE.txt"]).includes("How to restore"), "restore guide included");
+        const photoNames = Object.keys(files).filter(name => name.startsWith("uploads/products/"));
+        assert(photoNames.length >= 5, `photos included, got ${photoNames.length}`);
+        for (const name of photoNames) {
+          const onDisk = await Deno.readFile(`${dataDir}/${name}`);
+          assertEquals(files[name].length, onDisk.length, `size of ${name}`);
+          assert(files[name].every((byte, index) => byte === onDisk[index]), `${name} matches the server's file`);
+        }
       });
 
       await t.step("backup downloads a database file", async () => {
