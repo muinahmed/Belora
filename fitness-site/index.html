@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Kinetic Fitness Tracker</title>
+  <meta name="description" content="Track food, steps, water and workouts in one place.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<!-- app:start -->
+<div class="app">
+
+  <!-- Sidebar: shown on wide screens -->
+  <aside class="side">
+    <a class="brand" href="#home" aria-label="Kinetic home">
+      <svg class="brand-mark" viewBox="0 0 40 40" width="36" height="36" aria-hidden="true">
+        <circle cx="20" cy="20" r="15" fill="none" stroke="var(--purple)" stroke-width="6"/>
+        <path d="M20 5a15 15 0 0 1 15 15" fill="none" stroke="var(--orange)" stroke-width="6" stroke-linecap="round"/>
+        <circle cx="20" cy="20" r="4.5" fill="var(--teal)"/>
+      </svg>
+      <span>Kinetic</span>
+    </a>
+    <nav class="side-nav" aria-label="Main">
+      <a href="#home" data-nav="home"><span data-icon="home"></span>Home</a>
+      <a href="#diary" data-nav="diary"><span data-icon="diary"></span>Food diary</a>
+      <a href="#activity" data-nav="activity"><span data-icon="chart"></span>Activity</a>
+      <a href="#workout" data-nav="workout"><span data-icon="dumbbell"></span>Workouts</a>
+      <a href="#recipes" data-nav="recipes"><span data-icon="bowl"></span>Recipes</a>
+      <a href="#plans" data-nav="plans"><span data-icon="star"></span>Plans</a>
+      <a href="#profile" data-nav="profile"><span data-icon="user"></span>Profile</a>
+    </nav>
+    <button class="btn btn-primary side-add" type="button" data-act="quick-add"><span data-icon="plus"></span>Log something</button>
+  </aside>
+
+  <div class="main">
+    <header class="top">
+      <div class="top-text">
+        <p class="eyebrow" id="top-date"></p>
+        <h1 id="top-title">Kinetic</h1>
+      </div>
+      <a class="avatar" id="top-avatar" href="#profile" aria-label="Open profile"></a>
+    </header>
+    <main id="view" tabindex="-1"></main>
+  </div>
+
+  <!-- Bottom bar: shown on phones -->
+  <nav class="tabbar" aria-label="Main">
+    <a href="#home" data-nav="home"><span data-icon="home"></span><span>Home</span></a>
+    <a href="#diary" data-nav="diary"><span data-icon="diary"></span><span>Diary</span></a>
+    <button class="tab-add" type="button" data-act="quick-add" aria-label="Log something"><span data-icon="plus"></span></button>
+    <a href="#workout" data-nav="workout"><span data-icon="dumbbell"></span><span>Workouts</span></a>
+    <a href="#activity" data-nav="activity"><span data-icon="chart"></span><span>Activity</span></a>
+  </nav>
+</div>
+
+<dialog class="sheet" id="sheet" aria-labelledby="sheet-title"></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<!-- app:end -->
+<script src="js/app.js"></script>
+</body>
+</html>
