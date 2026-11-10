@@ -307,13 +307,22 @@
     return out + '</svg>';
   }
 
+  // Photos are optional. Put a file with the right name in the images folder and it
+  // appears; if the file is missing the picture is removed and the emoji shows instead.
+  const photo = (name, cls = '') => `<img class="photo ${cls}" src="images/${name}.jpg" alt="" loading="lazy">`;
+  const initial = () => esc((state.profile.name || 'K').trim().charAt(0).toUpperCase());
+  const avatarInner = () => {
+    const src = state.profile.photo;
+    return src && src.startsWith('data:image/') ? `<img src="${esc(src)}" alt="">` : initial();
+  };
+
   const sampleBanner = () => state.sample
     ? `<div class="banner"><span>You are looking at example data. Clear it to start your own log.</span><button class="btn btn-sm btn-ghost" type="button" data-act="start-fresh">Start fresh</button></div>`
     : '';
 
   const recipeCard = r => `
     <button class="recipe-card" type="button" data-act="open-recipe" data-id="${r.id}">
-      <span class="recipe-art ${r.tone}" aria-hidden="true">${r.e}</span>
+      <span class="recipe-art art ${r.tone}" aria-hidden="true">${r.e}${photo('recipe-' + r.id)}</span>
       <span class="recipe-info">
         <b>${esc(r.name)}</b>
         <span class="meta num"><span>${icon('flame', 15)}${r.kcal} kcal</span><span>${icon('clock', 15)}${r.time} min</span></span>
@@ -336,6 +345,7 @@
         ${sampleBanner()}
         <div class="home-grid">
           <section class="hero">
+            ${photo('workout-' + w.id, 'hero-photo')}
             <span class="chip">Today's pick</span>
             <h2>${esc(w.name)}</h2>
             <p class="num">${exCount} exercises · ${wk.min} min · ${wk.kcal} kcal</p>
@@ -520,12 +530,13 @@
             ${WORKOUTS.map(x => {
               const ex = x.rounds.flatMap(r => r.ex), n = ex.filter(y => d.done.includes(y.id)).length;
               return `<button class="wk-item" type="button" data-act="open-workout" data-id="${x.id}" aria-pressed="${x.id === w.id}">
-                <span class="thumb ${x.tone}" aria-hidden="true">${x.e}</span>
+                <span class="thumb art ${x.tone}" aria-hidden="true">${x.e}${photo('workout-' + x.id)}</span>
                 <span class="row-text"><b>${esc(x.name)}</b><span class="num">${x.level} · ${n}/${ex.length} done</span></span>
               </button>`;
             }).join('')}
           </div>
           <section class="card">
+            ${photo('workout-' + w.id, 'wk-banner')}
             <div class="wk-title">
               <h2>${esc(w.name)}</h2>
               <span class="chip">${w.level}</span>
@@ -565,7 +576,7 @@
         <button class="link back" type="button" data-act="close-recipe">${icon('back', 16)}All recipes</button>
         <div class="detail">
           <div class="stack">
-            <div class="detail-art ${r.tone}" aria-hidden="true">${r.e}</div>
+            <div class="detail-art art ${r.tone}" aria-hidden="true">${r.e}${photo('recipe-' + r.id)}</div>
             <section class="card">
               <h2>${esc(r.name)}</h2>
               <p class="meta num" style="margin:8px 0 16px"><span>${icon('flame', 15)}${r.kcal} kcal</span><span>${icon('clock', 15)}${r.time} min</span></p>
@@ -623,8 +634,12 @@
           <div class="stack">
             <section class="card">
               <div class="prof-head">
-                <span class="avatar" aria-hidden="true">${esc((p.name || 'K').trim().charAt(0).toUpperCase())}</span>
+                <span class="avatar" aria-hidden="true">${avatarInner()}</span>
                 <div><h2>${esc(p.name)}</h2><a class="chip" href="#plans" style="margin-top:6px">${plan.name} plan</a></div>
+              </div>
+              <div class="form-actions" style="margin-top:14px">
+                <label class="btn btn-sm btn-soft file-btn" for="p-photo">${p.photo ? 'Change photo' : 'Add a profile photo'}<input class="sr-only" id="p-photo" type="file" accept="image/*"></label>
+                ${p.photo ? '<button class="btn btn-sm btn-ghost" type="button" data-act="remove-photo">Remove photo</button>' : ''}
               </div>
               <div class="stat3 num" style="margin-top:18px">
                 <div><b>${p.weight} kg</b><span>Weight</span></div>
@@ -881,6 +896,7 @@
       state = { ...state, sample: false, days: {} };
       save(); render(); toast('Example data cleared. Your log starts now.');
     },
+    'remove-photo'() { delete state.profile.photo; save(); render(); toast('Profile photo removed'); },
     'ask-clear'() {
       openSheet('Clear all data?', `<p>This removes your profile, diary, steps and workouts from this browser. It cannot be undone.</p>
         <div class="form-actions" style="margin-top:0">
@@ -903,6 +919,25 @@
     toast(`Added ${fmt(n)} steps`);
   }
 
+  function setProfilePhoto(file) {
+    if (!file || !file.type.startsWith('image/')) { toast('Choose an image file, such as a JPG or PNG.'); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const size = 192, side = Math.min(img.width, img.height);
+        const c = document.createElement('canvas');
+        c.width = c.height = size;
+        c.getContext('2d').drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, size, size);
+        state.profile.photo = c.toDataURL('image/jpeg', 0.85);
+        save(); render(); toast('Profile photo updated');
+      };
+      img.onerror = () => toast('That file could not be read as an image. Try a JPG or PNG.');
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
   const FORMS = {
     steps(f) { addSteps(Number(f.steps.value)); },
     'custom-food'(f) {
@@ -923,7 +958,8 @@
         weight: num(f.weight, 30, 250, p.weight),
         stepGoal: num(f.stepGoal, 1000, 50000, p.stepGoal),
         activity: num(f.activity, 1.2, 1.725, p.activity),
-        goal: ['lose', 'maintain', 'gain'].includes(f.goal.value) ? f.goal.value : p.goal
+        goal: ['lose', 'maintain', 'gain'].includes(f.goal.value) ? f.goal.value : p.goal,
+        photo: p.photo
       };
       save(); render();
       toast(`Saved. Your budget is ${fmt(budget())} kcal a day.`);
@@ -937,7 +973,7 @@
     $('#view').innerHTML = PAGES[ui.view]();
     $('#top-title').textContent = ui.view === 'home' ? `Hi, ${p.name}` : TITLES[ui.view];
     $('#top-date').textContent = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
-    $('#top-avatar').textContent = (p.name || 'K').trim().charAt(0).toUpperCase();
+    $('#top-avatar').innerHTML = avatarInner();
     document.title = (ui.view === 'home' ? '' : TITLES[ui.view] + ' · ') + 'Kinetic Fitness Tracker';
     document.querySelectorAll('[data-nav]').forEach(a => {
       if (a.dataset.nav === ui.view) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
@@ -968,6 +1004,13 @@
     e.preventDefault();
     FORMS[f.dataset.form](f);
   });
+  document.addEventListener('change', e => {
+    if (e.target.id === 'p-photo') setProfilePhoto(e.target.files[0]);
+  });
+  // A photo that fails to load is removed, leaving the emoji underneath.
+  document.addEventListener('error', e => {
+    if (e.target.classList && e.target.classList.contains('photo')) e.target.remove();
+  }, true);
   document.addEventListener('input', e => {
     if (e.target.id === 'food-q') { ui.foodQuery = e.target.value; $('#food-list').innerHTML = foodRows(); }
   });

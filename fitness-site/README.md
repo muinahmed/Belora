@@ -16,7 +16,7 @@ python3 -m http.server 8000
 # then open http://localhost:8000
 ```
 
-To put it online, upload the three files to any static host (GitHub Pages, Netlify, Vercel).
+To put it online, upload the folder to any static host (GitHub Pages, Netlify, Vercel).
 
 ## Pages
 
@@ -38,7 +38,8 @@ The first visit shows example data so every page has something on it. **Start fr
 fitness-site/
 ├── index.html     page shell: sidebar, top bar, bottom tab bar, dialog
 ├── css/style.css  all styling, colour tokens, light and dark themes, responsive layout
-└── js/app.js      data, calculations, page rendering, actions, routing
+├── js/app.js      data, calculations, page rendering, actions, routing
+└── images/        optional photos (see images/README.md for the file names)
 ```
 
 `js/app.js` is split into nine numbered sections (data, storage, calculations, drawing helpers, pages, dialogs, chart, actions, start-up) so each part is easy to find and explain.
@@ -58,6 +59,12 @@ These are standard estimates for a student project, not medical advice.
 - Colours: purple `#8524DC`, orange `#FB6D37`, teal `#00CFC3`, yellow `#FDC102`.
 - Phone layout has a bottom tab bar; screens 960px and wider get a sidebar.
 - Follows the device's light or dark setting.
+
+## Photos
+
+The site is ready for photos but ships without any. Add `.jpg` files to the `images/` folder using the names listed in `images/README.md` and they appear on the home banner, workouts and recipes. Anything without a photo shows an emoji tile instead (the browser console will list the missing files; that is harmless).
+
+Each visitor can also add their own profile picture on the Profile page. It is shrunk to a small square and saved in their browser.
 
 ## Change the name
 
