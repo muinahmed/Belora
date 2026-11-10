@@ -84,15 +84,18 @@
       </div></div>`;
 
   // Column chart: one bar per day, hover or focus a column for the exact value.
+  // unit is [singular, plural], e.g. ['sign-up', 'sign-ups']
   function columnChart(box, rows, color, unit) {
+    const say = n => `${n} ${unit[n === 1 ? 0 : 1]}`;
     const max = Math.max(1, ...rows.map(r => r.count));
-    const rough = max / 4, pow = Math.pow(10, Math.floor(Math.log10(rough)));
-    const step = Math.max(1, [1, 2, 2.5, 5, 10].map(m => m * pow).find(s => s >= rough));
+    // The axis counts whole people, so its steps are whole numbers
+    const rough = Math.max(1, max / 4), pow = Math.pow(10, Math.floor(Math.log10(rough)));
+    const step = [1, 2, 5, 10].map(m => m * pow).find(s => s >= rough);
     const top = step * Math.ceil(max / step);
     const W = Math.max(280, Math.round(box.clientWidth || 500)), H = 200, m = { t: 14, r: 6, b: 26, l: 30 };
     const iw = W - m.l - m.r, ih = H - m.t - m.b, band = iw / rows.length, bw = Math.min(24, band * 0.55);
     const y = v => m.t + ih - (v / top) * ih;
-    let svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(unit)} per day for the last ${rows.length} days">`;
+    let svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(unit[1])} per day for the last ${rows.length} days">`;
     for (let v = 0; v <= top + 0.001; v += step) {
       svg += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1"/><text x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
     }
@@ -104,7 +107,7 @@
     });
     rows.forEach((r, i) => {
       const label = dayLabel(r.date, { weekday: 'short', day: 'numeric', month: 'short' });
-      svg += `<rect class="hit" x="${m.l + band * i}" y="${m.t}" width="${band}" height="${ih}" fill="transparent" tabindex="0" data-tip-x="${m.l + band * i + band / 2}" data-tip-y="${y(r.count)}" data-tip-v="${r.count} ${esc(unit)}" data-tip-d="${label}" aria-label="${label}: ${r.count} ${esc(unit)}"/>`;
+      svg += `<rect class="hit" x="${m.l + band * i}" y="${m.t}" width="${band}" height="${ih}" fill="transparent" tabindex="0" data-tip-x="${m.l + band * i + band / 2}" data-tip-y="${y(r.count)}" data-tip-v="${esc(say(r.count))}" data-tip-d="${label}" aria-label="${label}: ${esc(say(r.count))}"/>`;
     });
     box.innerHTML = svg + '</svg><div class="tip" hidden><b></b><span></span></div>';
   }
@@ -156,8 +159,8 @@
   }
   function drawDashboardCharts() {
     if (!dashboardData || !$('#chart-signups')) return;
-    columnChart($('#chart-signups'), dashboardData.signups, 'var(--c1)', 'sign-ups');
-    columnChart($('#chart-active'), dashboardData.active, 'var(--c3)', 'active users');
+    columnChart($('#chart-signups'), dashboardData.signups, 'var(--c1)', ['sign-up', 'sign-ups']);
+    columnChart($('#chart-active'), dashboardData.active, 'var(--c3)', ['active user', 'active users']);
   }
 
   /* ================= 3. Users ================= */
