@@ -213,6 +213,23 @@ describe('Admin: content', () => {
     assert.ok(!fs.existsSync(file));
   });
 
+  test('the photos that ship with the project load, survive edits and are never deleted', async () => {
+    const admin = await asAdmin();
+    const recipes = (await admin.get('/api/admin/recipes')).body.rows;
+    const workouts = (await admin.get('/api/admin/workouts')).body.rows;
+    for (const item of [...recipes, ...workouts]) {
+      const res = await admin.get(item.image);
+      assert.equal(res.status, 200, item.image);
+      assert.match(res.headers['content-type'], /image\/jpeg/);
+    }
+    const recipe = recipes[0];
+    assert.equal((await admin.put('/api/admin/recipes/' + recipe.id).set(...HEADER).send({ ...recipe, kcal: 350 })).status, 200);
+    assert.equal((await admin.get('/api/admin/recipes')).body.rows[0].image, recipe.image);
+    assert.equal((await admin.put('/api/admin/recipes/' + recipe.id).set(...HEADER).send({ ...recipe, image: '/img/../server.jpg' })).status, 400);
+    await admin.delete('/api/admin/recipes/' + recipe.id).set(...HEADER);
+    assert.ok(fs.existsSync(path.join(__dirname, '..', 'public', recipe.image)));
+  });
+
   test('plan prices can be changed and users see the new price', async () => {
     const admin = await asAdmin();
     const plan = (await admin.get('/api/admin/plans')).body.rows.find(p => p.slug === 'monthly');

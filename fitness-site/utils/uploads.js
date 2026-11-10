@@ -9,6 +9,9 @@ const { fail } = require('./validate');
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '..', 'public', 'uploads');
 const MAX_BYTES = 1.5 * 1024 * 1024;
 const UPLOAD_PATH = /^\/uploads\/[a-f0-9]{32}\.(jpg|png|webp)$/;
+// Photos that ship with the project, e.g. /img/recipe-dal.jpg
+const BUNDLED_PATH = /^\/img\/[a-z0-9-]+\.jpg$/;
+const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 function imageType(buffer) {
@@ -30,15 +33,18 @@ function saveDataUrl(dataUrl) {
   return `/uploads/${name}`;
 }
 
-// A photo path sent with a recipe or workout: '' for none, or a file this module saved.
+// A photo path sent with a recipe or workout: '' for none, a photo that ships with the
+// project, or a file this module saved.
 function imagePath(value) {
   if (value === undefined || value === null || value === '') return '';
+  if (typeof value === 'string' && BUNDLED_PATH.test(value) && fs.existsSync(path.join(PUBLIC_DIR, value.slice(1)))) return value;
   if (typeof value !== 'string' || !UPLOAD_PATH.test(value) || !fs.existsSync(path.join(UPLOAD_DIR, path.basename(value)))) {
     fail('Upload the photo again; the saved file could not be found.');
   }
   return value;
 }
 
+// Only uploaded files are ever deleted; photos that ship with the project stay.
 function removeImage(webPath) {
   if (UPLOAD_PATH.test(webPath || '')) fs.rmSync(path.join(UPLOAD_DIR, path.basename(webPath)), { force: true });
 }

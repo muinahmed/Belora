@@ -21,6 +21,8 @@ describe('User app', () => {
     assert.ok(body.workouts[0].rounds[0].exercises[0].id);
     assert.equal(body.recipes.length, 6);
     assert.ok(body.recipes[0].ingredients.length > 0);
+    assert.equal(body.recipes[0].image, '/img/recipe-chicken.jpg');
+    assert.equal(body.workouts[0].image, '/img/workout-full.jpg');
     assert.equal(body.plans.length, 3);
     assert.equal(body.password_hash, undefined);
   });

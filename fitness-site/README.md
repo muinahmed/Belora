@@ -62,7 +62,7 @@ npm start                # http://localhost:3000
 |---|---|
 | `npm start` | Starts the server on port 3000 (or `PORT`). The first start fills an empty database with demo data. |
 | `npm run seed` | Deletes all data and recreates the demo data. |
-| `npm test` | Runs all 39 API tests against an in-memory database. Real data is not touched. |
+| `npm test` | Runs all 40 API tests against an in-memory database. Real data is not touched. |
 
 The database file is `db/kinetic.db` and uploaded photos go to `public/uploads/`. Both are ignored by git.
 
@@ -196,6 +196,7 @@ fitness-site/
 │   ├── css/             style.css (app), admin.css (admin panel)
 │   ├── js/              common.js, auth.js, app.js, admin.js
 │   ├── fonts/           Manrope (SIL Open Font License)
+│   ├── img/             the demo workout and recipe photos
 │   └── uploads/         photos uploaded by administrators
 └── tests/               auth, app and admin API tests
 ```
@@ -215,7 +216,11 @@ These are standard estimates for a student project, not medical advice.
 - Colours: purple `#8524DC`, orange `#FB6D37`, teal `#00CFC3`, yellow `#FDC102`.
 - The app has a bottom tab bar on phones and a sidebar on screens 960px and wider. The admin panel has a dark sidebar so it is never mistaken for the app.
 - Follows the device's light or dark setting.
-- Recipes and workouts show an emoji tile until an administrator uploads a photo.
+- Every demo recipe and workout has a photo (`public/img/`). An administrator can replace it with an uploaded one; anything without a photo shows an emoji tile instead.
+
+### Image credits
+
+All ten photos in `public/img/` are **AI-generated** (made with ChatGPT) for this university project. They are illustrations, not pictures of real people or of dishes cooked from the recipes. Photos that administrators upload later are stored in `public/uploads/` and are not covered by this note.
 
 ## Deploying
 

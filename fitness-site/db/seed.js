@@ -75,6 +75,10 @@ const RECIPES = [
     ['Scramble the eggs in half the oil and set them aside.', 'Stir-fry the vegetables in the remaining oil for 3 minutes.', 'Add the rice and soy sauce and fry for 3 minutes more.', 'Fold the eggs and spring onion through and serve.']]
 ];
 
+// Photos that ship with the project (public/img), in the same order as WORKOUTS and RECIPES
+const WORKOUT_PHOTOS = ['full', 'core', 'legs', 'cardio'].map(n => `/img/workout-${n}.jpg`);
+const RECIPE_PHOTOS = ['chicken', 'dal', 'oats', 'fish', 'chola', 'eggrice'].map(n => `/img/recipe-${n}.jpg`);
+
 // name, email, gender, age, height, weight, goal, plan slug, joined (days ago), status
 const USERS = [
   ['Nadia Rahman', DEMO_USER.email, 'female', 24, 160, 58, 'maintain', 'free', 13, 'active'],
@@ -112,11 +116,11 @@ function seed() {
     FOODS.forEach(f => addFood.run(...f));
     const foods = db.prepare('SELECT * FROM foods').all();
 
-    const addWorkout = db.prepare('INSERT INTO workouts (name, level, tone, emoji, sort) VALUES (?, ?, ?, ?, ?)');
+    const addWorkout = db.prepare('INSERT INTO workouts (name, level, tone, emoji, image, sort) VALUES (?, ?, ?, ?, ?, ?)');
     const addRound = db.prepare('INSERT INTO rounds (workout_id, name, focus, sort) VALUES (?, ?, ?, ?)');
     const addExercise = db.prepare('INSERT INTO exercises (round_id, name, emoji, detail, kcal, minutes, sort) VALUES (?, ?, ?, ?, ?, ?, ?)');
     WORKOUTS.forEach(([name, level, tone, emoji, rounds], i) => {
-      const wid = addWorkout.run(name, level, tone, emoji, i).lastInsertRowid;
+      const wid = addWorkout.run(name, level, tone, emoji, WORKOUT_PHOTOS[i], i).lastInsertRowid;
       rounds.forEach(([rname, focus, exercises], j) => {
         const rid = addRound.run(wid, rname, focus, j).lastInsertRowid;
         exercises.forEach((e, k) => addExercise.run(rid, ...e, k));
@@ -124,11 +128,11 @@ function seed() {
     });
     const exerciseIds = db.prepare('SELECT id FROM exercises').all().map(r => r.id);
 
-    const addRecipe = db.prepare('INSERT INTO recipes (name, emoji, tone, kcal, minutes, protein, carbs, fat) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    const addRecipe = db.prepare('INSERT INTO recipes (name, emoji, tone, kcal, minutes, protein, carbs, fat, image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
     const addIngredient = db.prepare('INSERT INTO recipe_ingredients (recipe_id, name, amount, sort) VALUES (?, ?, ?, ?)');
     const addStep = db.prepare('INSERT INTO recipe_steps (recipe_id, text, sort) VALUES (?, ?, ?)');
-    RECIPES.forEach(r => {
-      const rid = addRecipe.run(...r.slice(0, 8)).lastInsertRowid;
+    RECIPES.forEach((r, n) => {
+      const rid = addRecipe.run(...r.slice(0, 8), RECIPE_PHOTOS[n]).lastInsertRowid;
       r[8].forEach(([n, a], i) => addIngredient.run(rid, n, a, i));
       r[9].forEach((text, i) => addStep.run(rid, text, i));
     });
