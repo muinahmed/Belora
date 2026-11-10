@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Admin · Kinetic Fitness Tracker</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body class="adm-body">
+<div class="adm">
+  <aside class="adm-side">
+    <a class="brand" href="#dashboard" aria-label="Kinetic admin">
+      <svg class="brand-mark" viewBox="0 0 40 40" width="34" height="34" aria-hidden="true">
+        <circle cx="20" cy="20" r="15" fill="none" stroke="#A05AEE" stroke-width="6"/>
+        <path d="M20 5a15 15 0 0 1 15 15" fill="none" stroke="#FB6D37" stroke-width="6" stroke-linecap="round"/>
+        <circle cx="20" cy="20" r="4.5" fill="#00CFC3"/>
+      </svg>
+      <span>Kinetic</span><span class="adm-tag">Admin</span>
+    </a>
+    <nav class="adm-nav" aria-label="Admin sections">
+      <a href="#dashboard" data-nav="dashboard"><span data-icon="grid" data-size="20"></span>Dashboard</a>
+      <a href="#users" data-nav="users"><span data-icon="users" data-size="20"></span>Users</a>
+      <a href="#foods" data-nav="foods"><span data-icon="apple" data-size="20"></span>Foods</a>
+      <a href="#workouts" data-nav="workouts"><span data-icon="dumbbell" data-size="20"></span>Workouts</a>
+      <a href="#recipes" data-nav="recipes"><span data-icon="bowl" data-size="20"></span>Recipes</a>
+      <a href="#plans" data-nav="plans"><span data-icon="star" data-size="20"></span>Plans</a>
+      <a href="#activity" data-nav="activity"><span data-icon="log" data-size="20"></span>Activity log</a>
+      <a href="#site" data-nav="site"><span data-icon="gear" data-size="20"></span>Site settings</a>
+    </nav>
+    <div class="adm-foot">
+      <a href="/index.html"><span data-icon="home" data-size="20"></span>Open the app</a>
+      <button type="button" data-act="logout"><span data-icon="logout" data-size="20"></span>Log out</button>
+    </div>
+  </aside>
+
+  <div class="adm-main">
+    <header class="adm-top">
+      <div>
+        <p class="eyebrow" id="adm-who">Administrator</p>
+        <h1 id="adm-title">Dashboard</h1>
+      </div>
+      <div class="adm-top-actions" id="adm-actions"></div>
+    </header>
+    <main id="adm-view" tabindex="-1"><p class="sub">Loading…</p></main>
+  </div>
+</div>
+
+<dialog class="sheet adm-modal" id="modal" aria-labelledby="modal-title"></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<script src="/js/common.js"></script>
+<script src="/js/admin.js"></script>
+</body>
+</html>

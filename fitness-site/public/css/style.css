@@ -63,6 +63,15 @@
   color-scheme: dark;
 }
 
+/* Manrope is served from /fonts, so the site makes no requests to other servers. */
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url('/fonts/manrope-latin-wght-normal.woff2') format('woff2');
+}
+
 *, *::before, *::after { box-sizing: border-box; }
 
 body {
@@ -146,7 +155,7 @@ button { cursor: pointer; }
 .side-nav a:hover { background: var(--surface-2); }
 .side-nav a[aria-current="page"] { background: var(--purple-soft); color: var(--purple-ink); }
 .side-nav span, .tabbar span[data-icon], .btn span[data-icon] { display: grid; }
-.side-add { margin-top: auto; }
+.side-foot { margin-top: auto; display: grid; gap: 8px; }
 
 /* ---------- Building blocks ---------- */
 .card { background: var(--surface); border-radius: var(--r-lg); padding: 20px; box-shadow: var(--shadow); min-width: 0; }
@@ -454,3 +463,23 @@ details.custom form { display: grid; gap: 12px; margin-top: 12px; }
   @keyframes rise { from { transform: translateY(6px); } to { transform: none; } }
   .ring .arc { transition: stroke-dasharray .5s ease; }
 }
+
+/* ---------- Log in and sign up page ---------- */
+.auth-page { min-height: 100vh; display: grid; place-items: center; padding-block: 32px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.auth-box { width: 100%; max-width: 440px; display: grid; gap: 20px; }
+.auth-brand { justify-self: center; font-size: 28px; }
+.auth-card { display: grid; gap: 18px; padding: 26px; }
+.auth-card h1 { font-size: 24px; font-weight: 800; letter-spacing: -.02em; }
+.tabs { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 2px solid var(--line); }
+.tabs button { border: 0; background: none; padding: 12px 0; font-weight: 800; font-size: 14px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); border-bottom: 3px solid transparent; margin-bottom: -2px; }
+.tabs button[aria-selected="true"] { color: var(--purple-ink); border-bottom-color: var(--purple); }
+.auth-form { display: grid; gap: 14px; }
+.form-error { padding: 10px 12px; border-radius: 12px; background: var(--orange-soft); color: var(--ink); font-size: 14px; font-weight: 600; }
+.demo-note { font-size: 13px; color: var(--ink-2); text-align: center; }
+input[type="email"], input[type="password"], textarea {
+  width: 100%; min-height: 44px; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--surface-2); font: inherit; color: inherit;
+}
+.not-found { min-height: 100vh; display: grid; place-items: center; text-align: center; padding: 24px; }
+.not-found h1 { font-size: 64px; font-weight: 800; color: var(--purple-ink); }

@@ -5,10 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Kinetic Fitness Tracker</title>
   <meta name="description" content="Track food, steps, water and workouts in one place.">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
 <!-- app:start -->
@@ -32,8 +29,12 @@
       <a href="#recipes" data-nav="recipes"><span data-icon="bowl"></span>Recipes</a>
       <a href="#plans" data-nav="plans"><span data-icon="star"></span>Plans</a>
       <a href="#profile" data-nav="profile"><span data-icon="user"></span>Profile</a>
+      <a href="/admin/" id="admin-link" hidden><span data-icon="grid"></span>Admin panel</a>
     </nav>
-    <button class="btn btn-primary side-add" type="button" data-act="quick-add"><span data-icon="plus"></span>Log something</button>
+    <div class="side-foot">
+      <button class="btn btn-primary" type="button" data-act="quick-add"><span data-icon="plus"></span>Log something</button>
+      <button class="btn btn-ghost" type="button" data-act="logout"><span data-icon="logout"></span>Log out</button>
+    </div>
   </aside>
 
   <div class="main">
@@ -60,6 +61,7 @@
 <dialog class="sheet" id="sheet" aria-labelledby="sheet-title"></dialog>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 <!-- app:end -->
-<script src="js/app.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/app.js"></script>
 </body>
 </html>

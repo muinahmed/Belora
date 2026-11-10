@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Log in · Kinetic Fitness Tracker</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<main class="auth-page">
+  <div class="auth-box">
+    <a class="brand auth-brand" href="/auth.html" aria-label="Kinetic">
+      <svg class="brand-mark" viewBox="0 0 40 40" width="44" height="44" aria-hidden="true">
+        <circle cx="20" cy="20" r="15" fill="none" stroke="var(--purple)" stroke-width="6"/>
+        <path d="M20 5a15 15 0 0 1 15 15" fill="none" stroke="var(--orange)" stroke-width="6" stroke-linecap="round"/>
+        <circle cx="20" cy="20" r="4.5" fill="var(--teal)"/>
+      </svg>
+      <span>Kinetic</span>
+    </a>
+
+    <div class="card auth-card">
+      <div class="tabs" role="tablist" aria-label="Log in or register">
+        <button type="button" role="tab" id="tab-login" aria-controls="panel-login" aria-selected="true">Sign in</button>
+        <button type="button" role="tab" id="tab-signup" aria-controls="panel-signup" aria-selected="false">Register</button>
+      </div>
+
+      <section id="panel-login" role="tabpanel" aria-labelledby="tab-login">
+        <form class="auth-form" id="login-form" novalidate>
+          <h1>Welcome back</h1>
+          <p class="form-error" id="login-error" role="alert" hidden></p>
+          <div class="field"><label for="login-email">Email</label><input id="login-email" name="email" type="email" autocomplete="email" required></div>
+          <div class="field"><label for="login-password">Password</label><input id="login-password" name="password" type="password" autocomplete="current-password" required></div>
+          <button class="btn btn-primary btn-block" type="submit">Sign in</button>
+        </form>
+      </section>
+
+      <section id="panel-signup" role="tabpanel" aria-labelledby="tab-signup" hidden>
+        <form class="auth-form" id="signup-form" novalidate>
+          <h1>Create your account</h1>
+          <p class="form-error" id="signup-error" role="alert" hidden></p>
+          <div class="field"><label for="signup-name">Name</label><input id="signup-name" name="name" type="text" autocomplete="name" maxlength="50" required></div>
+          <div class="field"><label for="signup-email">Email</label><input id="signup-email" name="email" type="email" autocomplete="email" required></div>
+          <div class="field"><label for="signup-password">Password</label><input id="signup-password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+            <span class="sub">At least 8 characters, with a letter and a number.</span></div>
+          <button class="btn btn-orange btn-block" type="submit">Create account</button>
+        </form>
+      </section>
+    </div>
+    <p class="demo-note">University project. Demo accounts are listed in the README.</p>
+  </div>
+</main>
+<script src="/js/common.js"></script>
+<script src="/js/auth.js"></script>
+</body>
+</html>

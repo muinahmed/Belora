@@ -1,12 +1,13 @@
-/* Kinetic Fitness Tracker
-   Plain JavaScript, no libraries. Everything is saved in the browser
-   (localStorage), so the site works without a server.
+/* Kinetic Fitness Tracker – the app a logged-in user sees.
+   Plain JavaScript, no libraries. Foods, workouts, recipes and plans come from the server
+   (an administrator manages them in the admin panel). Everything the user logs is saved
+   to the database through the API in routes/app.js.
 
    Sections in this file:
-   1. Data (foods, workouts, recipes, plans)
-   2. State and storage
+   1. Content from the server
+   2. State and saving
    3. Calculations (calorie budget, BMI, steps)
-   4. Small drawing helpers (icons, rings)
+   4. Small drawing helpers (rings, photos)
    5. Pages (one function per page)
    6. Dialogs
    7. Weekly chart
@@ -15,151 +16,21 @@
 (function () {
   'use strict';
 
-  /* ================= 1. Data ================= */
+  /* ================= 1. Content from the server ================= */
 
-  // name, emoji, serving, kcal, protein g, carbs g, fat g
-  const FOODS = [
-    ['White rice', '🍚', '1 cup cooked', 205, 4, 45, 0],
-    ['Brown rice', '🍚', '1 cup cooked', 215, 5, 45, 2],
-    ['Roti', '🫓', '1 piece', 120, 4, 22, 2],
-    ['Paratha', '🫓', '1 piece', 260, 5, 36, 11],
-    ['Masoor dal', '🥣', '1 cup', 180, 12, 30, 2],
-    ['Khichuri', '🍲', '1 plate', 320, 11, 52, 8],
-    ['Chicken curry', '🍗', '1 serving', 240, 24, 6, 13],
-    ['Fish and vegetable curry', '🐟', '1 serving', 220, 22, 8, 11],
-    ['Beef bhuna', '🥘', '1 serving', 310, 26, 5, 20],
-    ['Mixed vegetable bhaji', '🥬', '1 cup', 110, 3, 12, 6],
-    ['Egg omelette', '🍳', '2 eggs', 190, 13, 1, 15],
-    ['Boiled egg', '🥚', '1 egg', 78, 6, 1, 5],
-    ['Grilled chicken breast', '🍗', '100 g', 165, 31, 0, 4],
-    ['Chicken biryani', '🍛', '1 plate', 480, 22, 58, 17],
-    ['Oats with milk', '🥣', '1 bowl', 210, 9, 32, 5],
-    ['Plain yogurt', '🥛', '1 cup', 110, 8, 12, 3],
-    ['Milk tea', '☕', '1 cup', 90, 2, 12, 3],
-    ['Banana', '🍌', '1 medium', 105, 1, 27, 0],
-    ['Apple', '🍎', '1 medium', 95, 0, 25, 0],
-    ['Mango', '🥭', '1 cup sliced', 100, 1, 25, 1],
-    ['Cucumber salad', '🥗', '1 bowl', 60, 2, 9, 2],
-    ['Chickpea salad', '🥗', '1 bowl', 230, 11, 30, 7],
-    ['Peanuts', '🥜', '1 handful', 160, 7, 5, 14],
-    ['Singara', '🥟', '1 piece', 140, 3, 16, 7],
-    ['Whole wheat bread', '🍞', '2 slices', 140, 6, 24, 2],
-    ['Lentil soup', '🍵', '1 bowl', 150, 9, 22, 3]
-  ].map(([n, e, s, k, p, c, f]) => ({ n, e, s, k, p, c, f }));
+  const { api, esc, fmt, icon, toast, resizeImage, fillIcons } = window.K;
 
-  // Each exercise: id, name, emoji, how much, kcal burned, minutes
-  const WORKOUTS = [
-    {
-      id: 'full', name: 'Full-body burner', level: 'Medium', tone: 't-orange', e: '🔥',
-      rounds: [
-        { name: 'Round 1', focus: 'Legs and glutes', ex: [
-          ['f1', 'Glute bridge', '🧘', '3 × 15 reps', 28, 4],
-          ['f2', 'Bodyweight squat', '🏋️', '3 × 12 reps', 36, 4],
-          ['f3', 'Reverse lunge', '🦵', '3 × 10 each side', 34, 4],
-          ['f4', 'Hip extension', '🤸', '3 × 12 each side', 26, 3]
-        ] },
-        { name: 'Round 2', focus: 'Upper body and core', ex: [
-          ['f5', 'Push-up', '💪', '3 × 10 reps', 32, 3],
-          ['f6', 'Plank', '🧘', '3 × 40 seconds', 22, 3],
-          ['f7', 'Mountain climber', '🏃', '3 × 30 seconds', 42, 4]
-        ] }
-      ]
-    },
-    {
-      id: 'core', name: 'Core in 15', level: 'Easy', tone: 't-teal', e: '🧘',
-      rounds: [
-        { name: 'Round 1', focus: 'Front of the core', ex: [
-          ['c1', 'Dead bug', '🤸', '2 × 12 reps', 18, 3],
-          ['c2', 'Crunch', '💪', '2 × 15 reps', 20, 3],
-          ['c3', 'Leg raise', '🦵', '2 × 10 reps', 20, 3]
-        ] },
-        { name: 'Round 2', focus: 'Sides and back', ex: [
-          ['c4', 'Side plank', '🧘', '2 × 30 seconds each side', 16, 3],
-          ['c5', 'Bird dog', '🤸', '2 × 10 each side', 16, 3]
-        ] }
-      ]
-    },
-    {
-      id: 'legs', name: 'Strong legs', level: 'Hard', tone: 't-purple', e: '🦵',
-      rounds: [
-        { name: 'Round 1', focus: 'Strength', ex: [
-          ['l1', 'Jump squat', '🏋️', '4 × 10 reps', 48, 5],
-          ['l2', 'Walking lunge', '🦵', '4 × 12 steps', 44, 5],
-          ['l3', 'Single-leg deadlift', '🤸', '3 × 10 each side', 36, 4]
-        ] },
-        { name: 'Round 2', focus: 'Finisher', ex: [
-          ['l4', 'Wall sit', '🧘', '3 × 45 seconds', 24, 3],
-          ['l5', 'Calf raise', '🦵', '3 × 20 reps', 20, 3],
-          ['l6', 'High knees', '🏃', '3 × 30 seconds', 40, 3]
-        ] }
-      ]
-    },
-    {
-      id: 'cardio', name: 'No-kit cardio', level: 'Medium', tone: 't-yellow', e: '🏃',
-      rounds: [
-        { name: 'Round 1', focus: 'Warm up', ex: [
-          ['k1', 'Jumping jack', '🤸', '3 × 40 seconds', 36, 3],
-          ['k2', 'Butt kick', '🏃', '3 × 30 seconds', 30, 3]
-        ] },
-        { name: 'Round 2', focus: 'Push the pace', ex: [
-          ['k3', 'Burpee', '💪', '3 × 8 reps', 46, 4],
-          ['k4', 'Skater jump', '🤸', '3 × 30 seconds', 38, 3],
-          ['k5', 'Fast feet', '🏃', '3 × 20 seconds', 28, 2]
-        ] }
-      ]
-    }
-  ].map(w => ({
-    ...w,
-    rounds: w.rounds.map(r => ({ ...r, ex: r.ex.map(([id, n, e, d, k, m]) => ({ id, n, e, d, k, m })) }))
-  }));
-
-  const RECIPES = [
-    {
-      id: 'chicken', name: 'Lemon herb chicken with vegetables', e: '🍗', tone: 't-orange', kcal: 340, time: 30, p: 38, c: 14, f: 14,
-      ing: [['Chicken breast', '300 g'], ['Lemon juice', '2 tbsp'], ['Garlic, crushed', '3 cloves'], ['Carrot and beans', '2 cups'], ['Olive oil', '1 tbsp'], ['Black pepper and salt', 'to taste']],
-      steps: ['Mix the lemon juice, garlic, oil, pepper and salt. Coat the chicken and leave it for 10 minutes.', 'Cook the chicken in a hot pan for 6 to 7 minutes on each side until no pink remains.', 'Steam or stir-fry the vegetables for 5 minutes so they stay crisp.', 'Slice the chicken and serve it over the vegetables.']
-    },
-    {
-      id: 'dal', name: 'Masoor dal with spinach', e: '🥣', tone: 't-yellow', kcal: 260, time: 25, p: 16, c: 38, f: 5,
-      ing: [['Red lentils (masoor)', '1 cup'], ['Spinach, chopped', '2 cups'], ['Onion, sliced', '1 small'], ['Turmeric', '½ tsp'], ['Garlic', '2 cloves'], ['Mustard oil', '1 tsp']],
-      steps: ['Rinse the lentils and boil them with turmeric and 3 cups of water for 15 minutes.', 'Fry the onion and garlic in the oil until golden.', 'Stir the spinach and the fried onion into the lentils.', 'Simmer for 5 minutes, add salt, and serve hot.']
-    },
-    {
-      id: 'oats', name: 'Banana peanut oats', e: '🥣', tone: 't-purple', kcal: 320, time: 10, p: 12, c: 48, f: 10,
-      ing: [['Rolled oats', '½ cup'], ['Milk', '1 cup'], ['Banana', '1 medium'], ['Peanut butter', '1 tbsp'], ['Cinnamon', 'a pinch']],
-      steps: ['Simmer the oats in the milk for 5 minutes, stirring now and then.', 'Mash half the banana into the pot.', 'Pour into a bowl and top with the rest of the banana, the peanut butter and cinnamon.']
-    },
-    {
-      id: 'fish', name: 'Grilled fish with cucumber salad', e: '🐟', tone: 't-teal', kcal: 290, time: 20, p: 34, c: 9, f: 13,
-      ing: [['Fish fillet (rui or tilapia)', '250 g'], ['Cucumber', '1 large'], ['Tomato', '1 medium'], ['Lemon', '½'], ['Coriander leaves', 'a handful'], ['Oil', '2 tsp']],
-      steps: ['Rub the fish with salt, pepper and half the lemon juice.', 'Grill or pan-fry for 4 minutes on each side.', 'Chop the cucumber, tomato and coriander and dress with the remaining lemon juice.', 'Serve the fish with the salad on the side.']
-    },
-    {
-      id: 'chola', name: 'Chickpea salad bowl', e: '🥗', tone: 't-teal', kcal: 310, time: 15, p: 14, c: 42, f: 9,
-      ing: [['Boiled chickpeas', '1½ cups'], ['Onion, chopped', '1 small'], ['Green chilli', '1'], ['Cucumber, diced', '1 cup'], ['Lemon juice', '1 tbsp'], ['Roasted cumin powder', '½ tsp']],
-      steps: ['Put the chickpeas, onion, chilli and cucumber in a bowl.', 'Add the lemon juice, cumin and salt.', 'Toss well and eat straight away.']
-    },
-    {
-      id: 'eggrice', name: 'Egg and vegetable fried rice', e: '🍳', tone: 't-orange', kcal: 380, time: 20, p: 16, c: 52, f: 12,
-      ing: [['Cooked brown rice', '1½ cups'], ['Eggs', '2'], ['Peas and carrot', '1 cup'], ['Spring onion', '2 stalks'], ['Soy sauce', '1 tbsp'], ['Oil', '2 tsp']],
-      steps: ['Scramble the eggs in half the oil and set them aside.', 'Stir-fry the vegetables in the remaining oil for 3 minutes.', 'Add the rice and soy sauce and fry for 3 minutes more.', 'Fold the eggs and spring onion through and serve.']
-    }
-  ];
-
-  const PLANS = [
-    { id: 'free', name: 'Free', price: '৳0', per: '', features: ['Food diary with calorie budget', 'Steps and water tracking', 'Four guided workouts'] },
-    { id: 'monthly', name: 'Pro monthly', price: '৳299', per: '/ month', featured: true, tag: 'Most popular', features: ['Everything in Free', 'Weekly diet meal plans', 'Unlimited workout videos', 'Advice from trainers'] },
-    { id: 'yearly', name: 'Pro yearly', price: '৳2,499', per: '/ year', features: ['Everything in Pro monthly', 'Saves ৳1,089 a year', 'Printable progress report'] }
-  ];
+  // Filled by applyBootstrap() when the page loads
+  let FOODS = [], WORKOUTS = [], RECIPES = [], PLANS = [], ALL_EX = [];
+  let USER = null, ANNOUNCEMENT = '';
 
   const MEALS = [['breakfast', 'Breakfast'], ['lunch', 'Lunch'], ['dinner', 'Dinner'], ['snacks', 'Snacks']];
   const TITLES = { home: '', diary: 'Food diary', activity: 'Activity', workout: 'Workouts', recipes: 'Recipes', plans: 'Plans', profile: 'Profile' };
   const WATER_GOAL = 8;
   const ACTIVE_GOAL = 300; // kcal to burn per day
 
-  /* ================= 2. State and storage ================= */
+  /* ================= 2. State and saving ================= */
 
-  const KEY = 'kinetic.v1';
   const pad = n => String(n).padStart(2, '0');
   const dkey = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
@@ -170,59 +41,70 @@
   const uid = () => Date.now().toString(36) + (uidN++).toString(36);
 
   const blankDay = () => ({ meals: { breakfast: [], lunch: [], dinner: [], snacks: [] }, water: 0, steps: 0, done: [] });
-  const item = (i) => ({ id: uid(), ...FOODS[i] });
 
-  // Example data so the first visit shows a working app.
-  function sampleState() {
-    const days = {};
-    const steps = [7420, 9860, 4310, 8240, 11020, 6150, 5340];
-    const water = [6, 8, 5, 7, 8, 6, 4];
-    const menus = [
-      [[14, 17], [0, 4, 6], [2, 9, 11], [18]],
-      [[24, 11, 16], [5, 20], [2, 7], [15]],
-      [[3, 10, 16], [13], [0, 4, 9], [23]],
-      [[14, 18], [0, 7, 9], [25, 24], [17]],
-      [[24, 10], [1, 12, 20], [2, 4, 9], [19]],
-      [[14, 17, 11], [0, 6], [21], [16, 22]],
-      [[14, 17, 16], [0, 4, 7], [], []]
-    ];
-    const done = [['f1', 'f2', 'f3', 'f4', 'f5'], ['c1', 'c2', 'c3', 'c4', 'c5'], [], ['k1', 'k2', 'k3'], ['l1', 'l2', 'l3', 'l4', 'l5', 'l6'], ['c1', 'c2'], ['f1', 'f2', 'f3']];
-    last7().forEach((k, i) => {
-      const d = blankDay();
-      MEALS.forEach(([m], j) => { d.meals[m] = menus[i][j].map(item); });
-      d.steps = steps[i]; d.water = water[i]; d.done = done[i];
-      days[k] = d;
-    });
-    return {
-      sample: true, plan: 'free', days,
-      profile: { name: 'Nadia', gender: 'female', age: 24, height: 160, weight: 58, activity: 1.375, goal: 'maintain', stepGoal: 8000 }
-    };
-  }
-
-  function load() {
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) {
-        const s = JSON.parse(raw);
-        if (s && s.profile && s.days) return s;
-      }
-    } catch (e) { /* storage blocked or bad data: fall back to the sample */ }
-    return sampleState();
-  }
-  function save() {
-    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* the page still works without saving */ }
-  }
-
-  let state = load();
-  const ui = { view: 'home', date: todayKey(), workout: 'full', recipe: null, recipeTab: 'ingredients', metric: 'steps', foodMeal: 'breakfast', foodQuery: '' };
+  let state = { profile: {}, plan: '', days: {} };
+  const ui = { view: 'home', date: todayKey(), workout: null, recipe: null, recipeTab: 'ingredients', metric: 'steps', foodMeal: 'breakfast', foodQuery: '' };
 
   function day(k) {
     if (!state.days[k]) state.days[k] = blankDay();
-    const d = state.days[k];
-    if (!d.done) d.done = [];
-    return d;
+    return state.days[k];
   }
   const logKey = () => (ui.view === 'diary' ? ui.date : todayKey());
+
+  // The server uses full names (kcal, protein); the pages use short ones (k, p). These convert.
+  const foodIn = f => ({ fid: f.id, n: f.name, e: f.emoji, s: f.serving, k: f.kcal, p: f.protein, c: f.carbs, f: f.fat });
+  const itemIn = m => ({ id: 's' + m.id, fid: m.foodId, n: m.name, e: m.emoji, s: m.serving, k: m.kcal, p: m.protein, c: m.carbs, f: m.fat });
+  const itemOut = x => ({ foodId: x.fid ?? null, name: x.n, emoji: x.e, serving: x.s, kcal: x.k, protein: x.p, carbs: x.c, fat: x.f });
+  const dayOut = d => ({ water: d.water, steps: d.steps, done: d.done, meals: Object.fromEntries(MEALS.map(([m]) => [m, (d.meals[m] || []).map(itemOut)])) });
+  const profileOut = p => ({ name: p.name, gender: p.gender, age: p.age, height: p.height, weight: p.weight, activity: p.activity, goal: p.goal, stepGoal: p.stepGoal, photo: p.photo || '' });
+
+  function applyBootstrap(b) {
+    USER = b.user;
+    ANNOUNCEMENT = b.announcement || '';
+    FOODS = b.foods.map(foodIn);
+    WORKOUTS = b.workouts.map(w => ({
+      id: w.id, name: w.name, level: w.level, tone: 't-' + w.tone, e: w.emoji, image: w.image,
+      rounds: w.rounds.map(r => ({ name: r.name, focus: r.focus, ex: r.exercises.map(x => ({ id: x.id, n: x.name, e: x.emoji, d: x.detail, k: x.kcal, m: x.minutes })) }))
+    }));
+    ALL_EX = WORKOUTS.flatMap(w => w.rounds.flatMap(r => r.ex));
+    RECIPES = b.recipes.map(r => ({
+      id: r.id, name: r.name, e: r.emoji, tone: 't-' + r.tone, kcal: r.kcal, time: r.minutes, p: r.protein, c: r.carbs, f: r.fat,
+      image: r.image, ing: r.ingredients.map(i => [i.name, i.amount]), steps: r.steps
+    }));
+    PLANS = b.plans.map(p => ({ id: p.slug, name: p.name, price: '৳' + fmt(p.price), per: p.period, featured: !!p.featured, tag: p.tag, features: p.features }));
+    state = { profile: b.profile, plan: b.plan, days: {} };
+    for (const [k, d] of Object.entries(b.days)) {
+      state.days[k] = { water: d.water, steps: d.steps, done: d.done, meals: Object.fromEntries(MEALS.map(([m]) => [m, (d.meals[m] || []).map(itemIn)])) };
+    }
+    if (!WORKOUTS.some(w => w.id === ui.workout)) ui.workout = WORKOUTS.length ? WORKOUTS[0].id : null;
+    rememberSaved();
+  }
+
+  // save() sends only what changed since the last save: each edited day, the profile, the plan.
+  const EMPTY_DAY = JSON.stringify(dayOut(blankDay()));
+  let saved = { days: {}, profile: '', plan: '' };
+  function rememberSaved() {
+    saved = { days: {}, profile: JSON.stringify(profileOut(state.profile)), plan: state.plan };
+    for (const [k, d] of Object.entries(state.days)) saved.days[k] = JSON.stringify(dayOut(d));
+  }
+  let queue = Promise.resolve();
+  function save() {
+    const jobs = [];
+    for (const [k, d] of Object.entries(state.days)) {
+      const json = JSON.stringify(dayOut(d));
+      if (json !== (saved.days[k] ?? EMPTY_DAY)) { saved.days[k] = json; jobs.push(() => api('/days/' + k, { method: 'PUT', body: JSON.parse(json) })); }
+    }
+    const profile = JSON.stringify(profileOut(state.profile));
+    if (profile !== saved.profile) { saved.profile = profile; jobs.push(() => api('/profile', { method: 'PUT', body: JSON.parse(profile) })); }
+    if (state.plan !== saved.plan) { saved.plan = state.plan; jobs.push(() => api('/plan', { method: 'PUT', body: { plan: state.plan } })); }
+    if (!jobs.length) return;
+    // One save at a time, in order, so a slow request can never overwrite a newer one.
+    queue = queue.then(async () => { for (const job of jobs) await job(); }).catch(err => {
+      if (err.status === 401) { location.href = '/auth.html'; return; }
+      saved = { days: {}, profile: '', plan: '' };          // forget what was sent, so the next save tries again
+      toast('Not saved: ' + err.message);
+    });
+  }
 
   /* ================= 3. Calculations ================= */
 
@@ -251,7 +133,6 @@
       min: steps / 110
     };
   }
-  const ALL_EX = WORKOUTS.flatMap(w => w.rounds.flatMap(r => r.ex));
   function workoutStats(d) {
     return ALL_EX.filter(x => d.done.includes(x.id)).reduce((t, x) => ({ kcal: t.kcal + x.k, min: t.min + x.m }), { kcal: 0, min: 0 });
   }
@@ -266,30 +147,7 @@
   /* ================= 4. Drawing helpers ================= */
 
   const $ = (s, r = document) => r.querySelector(s);
-  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const fmt = n => Math.round(n).toLocaleString('en-US');
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
-
-  const ICONS = {
-    home: 'M3 11l9-7 9 7v8a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
-    diary: 'M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01',
-    plus: 'M12 5v14M5 12h14',
-    dumbbell: 'M6.5 6.5v11M17.5 6.5v11M3 9v6M21 9v6M6.5 12h11',
-    chart: 'M5 20V11M12 20V4M19 20v-6',
-    user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 20c0-3.3 3.6-6 8-6s8 2.7 8 6',
-    bowl: 'M3 11h18a9 9 0 0 1-18 0zM9 3v4M15 3v4',
-    star: 'M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z',
-    drop: 'M12 3s6 6.3 6 11a6 6 0 0 1-12 0c0-4.7 6-11 6-11z',
-    flame: 'M12 3c1 3.5 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3.2 1.8-4.2C9.6 10.4 11.4 8 12 3z',
-    clock: 'M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z',
-    check: 'M5 12.5l4.5 4.5L19 7.5',
-    x: 'M6 6l12 12M18 6L6 18',
-    back: 'M15 5l-7 7 7 7',
-    steps: 'M3 17l6-6 4 4 8-8M15 7h6v6',
-    pin: 'M12 21s7-6.1 7-11a7 7 0 0 0-14 0c0 4.9 7 11 7 11zM12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z'
-  };
-  const icon = (name, size = 22) =>
-    `<svg class="ic" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${ICONS[name]}"/></svg>`;
 
   // One or more progress rings drawn as SVG circles. rings: [{pct, color}] from the outside in.
   function ringSvg(size, width, rings, label) {
@@ -307,22 +165,20 @@
     return out + '</svg>';
   }
 
-  // Photos are optional. Put a file with the right name in the images folder and it
-  // appears; if the file is missing the picture is removed and the emoji shows instead.
-  const photo = (name, cls = '') => `<img class="photo ${cls}" src="images/${name}.jpg" alt="" loading="lazy">`;
+  // A photo an administrator uploaded, laid over the emoji tile. Nothing when there is none.
+  const photo = (src, cls = '') => (src ? `<img class="photo ${cls}" src="${esc(src)}" alt="" loading="lazy">` : '');
   const initial = () => esc((state.profile.name || 'K').trim().charAt(0).toUpperCase());
   const avatarInner = () => {
     const src = state.profile.photo;
     return src && src.startsWith('data:image/') ? `<img src="${esc(src)}" alt="">` : initial();
   };
 
-  const sampleBanner = () => state.sample
-    ? `<div class="banner"><span>You are looking at example data. Clear it to start your own log.</span><button class="btn btn-sm btn-ghost" type="button" data-act="start-fresh">Start fresh</button></div>`
-    : '';
+  const announcement = () => (ANNOUNCEMENT ? `<div class="banner"><span>${esc(ANNOUNCEMENT)}</span></div>` : '');
+  const emptyCard = (title, text) => `<section class="card"><h2 style="font-size:18px;font-weight:800;margin-bottom:6px">${title}</h2><p class="sub">${text}</p></section>`;
 
   const recipeCard = r => `
     <button class="recipe-card" type="button" data-act="open-recipe" data-id="${r.id}">
-      <span class="recipe-art art ${r.tone}" aria-hidden="true">${r.e}${photo('recipe-' + r.id)}</span>
+      <span class="recipe-art art ${r.tone}" aria-hidden="true">${esc(r.e)}${photo(r.image)}</span>
       <span class="recipe-info">
         <b>${esc(r.name)}</b>
         <span class="meta num"><span>${icon('flame', 15)}${r.kcal} kcal</span><span>${icon('clock', 15)}${r.time} min</span></span>
@@ -336,21 +192,23 @@
       const d = day(todayKey());
       const e = eaten(d), b = budget(), left = b - e.k;
       const w = WORKOUTS[0];
-      const exCount = w.rounds.reduce((n, r) => n + r.ex.length, 0);
-      const wk = { kcal: w.rounds.reduce((n, r) => n + r.ex.reduce((a, x) => a + x.k, 0), 0), min: w.rounds.reduce((n, r) => n + r.ex.reduce((a, x) => a + x.m, 0), 0) };
+      const wex = w ? w.rounds.flatMap(r => r.ex) : [];
+      const exCount = wex.length;
+      const wk = { kcal: wex.reduce((a, x) => a + x.k, 0), min: wex.reduce((a, x) => a + x.m, 0) };
       const goal = state.profile.stepGoal;
       const active = Math.round(stepStats(d.steps).min + workoutStats(d).min);
-      const popular = [['full', 'f2'], ['full', 'f5'], ['legs', 'l2'], ['cardio', 'k3'], ['core', 'c4']];
+      // One exercise from each workout, plus a second from the first
+      const popular = WORKOUTS.map(wo => [wo, wo.rounds.flatMap(r => r.ex)[1] || wo.rounds.flatMap(r => r.ex)[0]]).concat(w && wex[4] ? [[w, wex[4]]] : []).filter(([, x]) => x);
       return `
-        ${sampleBanner()}
+        ${announcement()}
         <div class="home-grid">
-          <section class="hero">
-            ${photo('workout-' + w.id, 'hero-photo')}
+          ${w ? `<section class="hero">
+            ${photo(w.image, 'hero-photo')}
             <span class="chip">Today's pick</span>
             <h2>${esc(w.name)}</h2>
             <p class="num">${exCount} exercises · ${wk.min} min · ${wk.kcal} kcal</p>
             <button class="btn btn-white" type="button" data-act="open-workout" data-id="${w.id}">Start workout</button>
-          </section>
+          </section>` : emptyCard('No workouts yet', 'Workouts will appear here once an administrator adds one.')}
           <section class="card">
             <header class="sec-head"><h2>Today's calories</h2><a href="#diary">Open diary</a></header>
             <div class="today-row">
@@ -391,10 +249,9 @@
         <section>
           <header class="sec-head"><h2>Popular exercises</h2><a href="#workout">View all</a></header>
           <div class="hscroll">
-            ${popular.map(([wid, xid]) => {
-              const wo = WORKOUTS.find(x => x.id === wid), x = ALL_EX.find(y => y.id === xid);
-              return `<button class="ex-card" type="button" data-act="open-workout" data-id="${wid}">
-                <span class="thumb ${wo.tone}" aria-hidden="true">${x.e}</span>
+            ${popular.map(([wo, x]) => {
+              return `<button class="ex-card" type="button" data-act="open-workout" data-id="${wo.id}">
+                <span class="thumb ${wo.tone}" aria-hidden="true">${esc(x.e)}</span>
                 <b>${esc(x.n)}</b>
                 <span class="sub">${esc(x.d)}</span>
                 <span class="meta num"><span>${icon('flame', 15)}${x.k} kcal</span><span>${icon('clock', 15)}${x.m} min</span></span>
@@ -414,7 +271,6 @@
       const e = eaten(d), b = budget(), t = targets(), left = b - e.k;
       const macros = [['Protein', e.p, t.p, 'var(--c1)'], ['Carbs', e.c, t.c, 'var(--c2)'], ['Fat', e.f, t.f, 'var(--c3)']];
       return `
-        ${sampleBanner()}
         <div class="week" role="group" aria-label="Choose a day">
           ${last7().map(k => {
             const dt = parseKey(k);
@@ -472,7 +328,6 @@
       const s = stepStats(d.steps), e = eaten(d), w = workoutStats(d);
       const M = METRICS[ui.metric];
       return `
-        ${sampleBanner()}
         <div class="act-grid">
           <section class="card steps-card">
             <div class="ringbox">
@@ -520,26 +375,26 @@
     workout() {
       const d = day(todayKey());
       const w = WORKOUTS.find(x => x.id === ui.workout) || WORKOUTS[0];
+      if (!w) return emptyCard('No workouts yet', 'Workouts will appear here once an administrator adds one.');
       const all = w.rounds.flatMap(r => r.ex);
       const done = all.filter(x => d.done.includes(x.id));
       const kcal = all.reduce((n, x) => n + x.k, 0), min = all.reduce((n, x) => n + x.m, 0);
       return `
-        ${sampleBanner()}
         <div class="wk-grid">
           <div class="wk-list" role="group" aria-label="Choose a workout">
             ${WORKOUTS.map(x => {
               const ex = x.rounds.flatMap(r => r.ex), n = ex.filter(y => d.done.includes(y.id)).length;
               return `<button class="wk-item" type="button" data-act="open-workout" data-id="${x.id}" aria-pressed="${x.id === w.id}">
-                <span class="thumb art ${x.tone}" aria-hidden="true">${x.e}${photo('workout-' + x.id)}</span>
-                <span class="row-text"><b>${esc(x.name)}</b><span class="num">${x.level} · ${n}/${ex.length} done</span></span>
+                <span class="thumb art ${x.tone}" aria-hidden="true">${esc(x.e)}${photo(x.image)}</span>
+                <span class="row-text"><b>${esc(x.name)}</b><span class="num">${esc(x.level)} · ${n}/${ex.length} done</span></span>
               </button>`;
             }).join('')}
           </div>
           <section class="card">
-            ${photo('workout-' + w.id, 'wk-banner')}
+            ${photo(w.image, 'wk-banner')}
             <div class="wk-title">
               <h2>${esc(w.name)}</h2>
-              <span class="chip">${w.level}</span>
+              <span class="chip">${esc(w.level)}</span>
             </div>
             <p class="meta num" style="margin-top:8px"><span>${icon('flame', 15)}${kcal} kcal</span><span>${icon('clock', 15)}${min} min</span><span>${icon('dumbbell', 15)}${all.length} exercises</span></p>
             <div class="progress">
@@ -548,10 +403,10 @@
             </div>
             ${w.rounds.map(r => `
               <div class="round">
-                <div class="round-head"><span style="font-weight:800;color:var(--ink);font-size:15px">${r.name}</span><span>${esc(r.focus)}</span></div>
+                <div class="round-head"><span style="font-weight:800;color:var(--ink);font-size:15px">${esc(r.name)}</span><span>${esc(r.focus)}</span></div>
                 <div class="rows">
                   ${r.ex.map(x => `<button class="row ex" type="button" data-act="toggle-ex" data-id="${x.id}" aria-pressed="${d.done.includes(x.id)}">
-                    <span class="thumb ${w.tone}" aria-hidden="true">${x.e}</span>
+                    <span class="thumb ${w.tone}" aria-hidden="true">${esc(x.e)}</span>
                     <span class="row-text"><b>${esc(x.n)}</b><span class="num">${esc(x.d)} · ${x.k} kcal</span></span>
                     <span class="tick">${icon('check', 16)}</span>
                   </button>`).join('')}
@@ -569,14 +424,14 @@
       const r = RECIPES.find(x => x.id === ui.recipe);
       if (!r) {
         return `<p class="sub" style="max-width:60ch">Balanced meals between 260 and 380 kcal a serving. Open one to see the ingredients, then add it to your diary.</p>
-          <div class="recipe-grid">${RECIPES.map(recipeCard).join('')}</div>`;
+          ${RECIPES.length ? `<div class="recipe-grid">${RECIPES.map(recipeCard).join('')}</div>` : emptyCard('No recipes yet', 'Recipes will appear here once an administrator adds one.')}`;
       }
       const tab = ui.recipeTab;
       return `
         <button class="link back" type="button" data-act="close-recipe">${icon('back', 16)}All recipes</button>
         <div class="detail">
           <div class="stack">
-            <div class="detail-art art ${r.tone}" aria-hidden="true">${r.e}${photo('recipe-' + r.id)}</div>
+            <div class="detail-art art ${r.tone}" aria-hidden="true">${esc(r.e)}${photo(r.image)}</div>
             <section class="card">
               <h2>${esc(r.name)}</h2>
               <p class="meta num" style="margin:8px 0 16px"><span>${icon('flame', 15)}${r.kcal} kcal</span><span>${icon('clock', 15)}${r.time} min</span></p>
@@ -614,11 +469,11 @@
           ${PLANS.map(p => {
             const current = state.plan === p.id;
             return `<section class="plan${p.featured ? ' featured' : ''}">
-              ${p.tag ? `<span class="chip">${p.tag}</span>` : ''}
-              <h2>${p.name}</h2>
-              <p class="price num">${p.price} <small>${p.per}</small></p>
-              <ul>${p.features.map(f => `<li>${icon('check', 16)}<span>${f}</span></li>`).join('')}</ul>
-              <button class="btn ${p.featured ? 'btn-white' : current ? 'btn-ghost' : 'btn-primary'}" type="button" data-act="choose-plan" data-id="${p.id}" ${current ? 'disabled' : ''}>${current ? 'Your current plan' : 'Choose ' + p.name}</button>
+              ${p.tag ? `<span class="chip">${esc(p.tag)}</span>` : ''}
+              <h2>${esc(p.name)}</h2>
+              <p class="price num">${esc(p.price)} <small>${esc(p.per)}</small></p>
+              <ul>${p.features.map(f => `<li>${icon('check', 16)}<span>${esc(f)}</span></li>`).join('')}</ul>
+              <button class="btn ${p.featured ? 'btn-white' : current ? 'btn-ghost' : 'btn-primary'}" type="button" data-act="choose-plan" data-id="${p.id}" ${current ? 'disabled' : ''}>${current ? 'Your current plan' : 'Choose ' + esc(p.name)}</button>
             </section>`;
           }).join('')}
         </div>`;
@@ -626,16 +481,15 @@
 
     profile() {
       const p = state.profile, b = bmi(), t = targets();
-      const plan = PLANS.find(x => x.id === state.plan) || PLANS[0];
+      const plan = PLANS.find(x => x.id === state.plan) || PLANS[0] || { name: 'No' };
       const opt = (v, cur, label) => `<option value="${v}" ${String(v) === String(cur) ? 'selected' : ''}>${label}</option>`;
       return `
-        ${sampleBanner()}
         <div class="prof-grid">
           <div class="stack">
             <section class="card">
               <div class="prof-head">
                 <span class="avatar" aria-hidden="true">${avatarInner()}</span>
-                <div><h2>${esc(p.name)}</h2><a class="chip" href="#plans" style="margin-top:6px">${plan.name} plan</a></div>
+                <div><h2>${esc(p.name)}</h2><p class="sub" style="overflow-wrap:anywhere">${esc(p.email)}</p><a class="chip" href="#plans" style="margin-top:6px">${esc(plan.name)} plan</a></div>
               </div>
               <div class="form-actions" style="margin-top:14px">
                 <label class="btn btn-sm btn-soft file-btn" for="p-photo">${p.photo ? 'Change photo' : 'Add a profile photo'}<input class="sr-only" id="p-photo" type="file" accept="image/*"></label>
@@ -664,6 +518,7 @@
               </dl>
             </section>
           </div>
+          <div class="stack">
           <section class="card">
             <header class="sec-head"><h2>Your details</h2></header>
             <form data-form="profile">
@@ -681,10 +536,26 @@
               </div>
               <div class="form-actions">
                 <button class="btn btn-primary" type="submit">Save details</button>
-                <button class="btn btn-ghost" type="button" data-act="ask-clear">Clear all data</button>
+                <button class="btn btn-ghost" type="button" data-act="ask-clear">Clear my logs</button>
               </div>
             </form>
           </section>
+          <section class="card">
+            <header class="sec-head"><h2>Password and account</h2></header>
+            <form data-form="password">
+              <div class="form-grid">
+                <div class="field"><label for="pw-current">Current password</label><input id="pw-current" name="current" type="password" autocomplete="current-password" required></div>
+                <div class="field"><label for="pw-next">New password</label><input id="pw-next" name="next" type="password" autocomplete="new-password" minlength="8" required></div>
+              </div>
+              <p class="sub" style="margin-top:8px">At least 8 characters, with a letter and a number.</p>
+              <div class="form-actions">
+                <button class="btn btn-soft" type="submit">Change password</button>
+                ${USER.role === 'admin' ? '<a class="btn btn-ghost" href="/admin/">Open admin panel</a>' : ''}
+                <button class="btn btn-ghost" type="button" data-act="logout">Log out</button>
+              </div>
+            </form>
+          </section>
+          </div>
         </div>`;
     }
   };
@@ -720,7 +591,7 @@
     const list = FOODS.map((f, i) => [f, i]).filter(([f]) => !q || f.n.toLowerCase().includes(q));
     if (!list.length) return `<li class="empty">No food matches “${esc(ui.foodQuery)}”. Add it yourself below.</li>`;
     return list.map(([f, i]) => `<li><button class="row" type="button" data-act="pick-food" data-i="${i}">
-      <span class="thumb" aria-hidden="true">${f.e}</span>
+      <span class="thumb" aria-hidden="true">${esc(f.e)}</span>
       <span class="row-text"><b>${esc(f.n)}</b><span>${esc(f.s)}</span></span>
       <span class="kcal num">${f.k} kcal</span>
     </button></li>`).join('');
@@ -745,14 +616,6 @@
         </form>
       </details>
       <button class="btn btn-ghost btn-block" type="button" data-act="close-sheet">Done</button>`);
-  }
-
-  let toastTimer;
-  function toast(msg) {
-    const el = $('#toast');
-    el.textContent = msg; el.hidden = false;
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { el.hidden = true; }, 2600);
   }
 
   /* ================= 7. Weekly chart ================= */
@@ -831,7 +694,7 @@
   /* ================= 8. Actions ================= */
 
   function addFood(food, meal, key) {
-    day(key).meals[meal].push({ id: uid(), n: food.n, e: food.e, s: food.s, k: food.k, p: food.p, c: food.c, f: food.f });
+    day(key).meals[meal].push({ id: uid(), fid: food.fid ?? null, n: food.n, e: food.e, s: food.s, k: food.k, p: food.p, c: food.c, f: food.f });
     save(); render();
     toast(`Added ${food.n} to ${MEALS.find(m => m[0] === meal)[1].toLowerCase()}`);
   }
@@ -867,21 +730,21 @@
     },
     'steps-plus'(el) { addSteps(Number(el.dataset.n)); },
     metric(el) { ui.metric = el.dataset.id; render(); },
-    'open-workout'(el) { ui.workout = el.dataset.id; go('workout'); },
+    'open-workout'(el) { ui.workout = Number(el.dataset.id); go('workout'); },
     'toggle-ex'(el) {
-      const d = day(todayKey()), id = el.dataset.id;
+      const d = day(todayKey()), id = Number(el.dataset.id);
       d.done = d.done.includes(id) ? d.done.filter(x => x !== id) : [...d.done, id];
       save(); render();
       const again = document.querySelector(`[data-act="toggle-ex"][data-id="${id}"]`);
       if (again) again.focus();
     },
     'reset-workout'(el) {
-      const w = WORKOUTS.find(x => x.id === el.dataset.id), ids = w.rounds.flatMap(r => r.ex.map(x => x.id));
+      const w = WORKOUTS.find(x => x.id === Number(el.dataset.id)), ids = w.rounds.flatMap(r => r.ex.map(x => x.id));
       const d = day(todayKey());
       d.done = d.done.filter(x => !ids.includes(x));
       save(); render(); toast('Workout reset');
     },
-    'open-recipe'(el) { ui.recipe = el.dataset.id; ui.recipeTab = 'ingredients'; go('recipes'); window.scrollTo(0, 0); },
+    'open-recipe'(el) { ui.recipe = Number(el.dataset.id); ui.recipeTab = 'ingredients'; go('recipes'); window.scrollTo(0, 0); },
     'close-recipe'() { ui.recipe = null; render(); },
     'recipe-tab'(el) { ui.recipeTab = el.dataset.id; render(); },
     'recipe-add'(el) {
@@ -892,23 +755,26 @@
       state.plan = el.dataset.id; save(); render();
       toast(`${PLANS.find(p => p.id === state.plan).name} selected. No payment was taken.`);
     },
-    'start-fresh'() {
-      state = { ...state, sample: false, days: {} };
-      save(); render(); toast('Example data cleared. Your log starts now.');
-    },
-    'remove-photo'() { delete state.profile.photo; save(); render(); toast('Profile photo removed'); },
+    'remove-photo'() { state.profile.photo = ''; save(); render(); toast('Profile photo removed'); },
     'ask-clear'() {
-      openSheet('Clear all data?', `<p>This removes your profile, diary, steps and workouts from this browser. It cannot be undone.</p>
+      openSheet('Clear your logs?', `<p>This removes everything you have logged: your diary, water, steps and finished workouts. Your account and profile stay. It cannot be undone.</p>
         <div class="form-actions" style="margin-top:0">
-          <button class="btn btn-orange" type="button" data-act="clear-all">Clear everything</button>
-          <button class="btn btn-ghost" type="button" data-act="close-sheet">Keep my data</button>
+          <button class="btn btn-orange" type="button" data-act="clear-all">Clear my logs</button>
+          <button class="btn btn-ghost" type="button" data-act="close-sheet">Keep them</button>
         </div>`);
     },
-    'clear-all'() {
-      try { localStorage.removeItem(KEY); } catch (e) { /* nothing stored */ }
-      state = sampleState();
-      closeSheet(); render(); toast('Everything cleared. Example data is back.');
-    }
+    async 'clear-all'() {
+      try {
+        await api('/data', { method: 'DELETE' });
+        state.days = {}; rememberSaved();
+        closeSheet(); render(); toast('Your logs were cleared.');
+      } catch (err) { toast(err.message); }
+    },
+    async logout() {
+      try { await api('/auth/logout', { method: 'POST' }); } catch (err) { /* leave anyway */ }
+      location.href = '/auth.html';
+    },
+    reload() { location.reload(); }
   };
 
   function addSteps(n) {
@@ -959,11 +825,19 @@
         stepGoal: num(f.stepGoal, 1000, 50000, p.stepGoal),
         activity: num(f.activity, 1.2, 1.725, p.activity),
         goal: ['lose', 'maintain', 'gain'].includes(f.goal.value) ? f.goal.value : p.goal,
+        email: p.email,
         photo: p.photo
       };
       save(); render();
       toast(`Saved. Your budget is ${fmt(budget())} kcal a day.`);
     }
+  };
+
+  FORMS.password = async f => {
+    try {
+      await api('/password', { method: 'PUT', body: { current: f.current.value, next: f.next.value } });
+      f.reset(); toast('Password changed.');
+    } catch (err) { toast(err.message); }
   };
 
   /* ================= 9. Start-up and routing ================= */
@@ -990,7 +864,7 @@
     render();
   }
 
-  document.querySelectorAll('[data-icon]').forEach(el => { el.innerHTML = icon(el.dataset.icon); });
+  fillIcons();
 
   document.addEventListener('click', e => {
     if (e.target === sheet()) { closeSheet(); return; }   // click on the dark backdrop
@@ -1022,6 +896,19 @@
   }));
   let resizeTimer;
   window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawChart, 120); });
-  window.addEventListener('hashchange', route);
-  route();
+  window.addEventListener('hashchange', () => { if (USER) route(); });
+
+  // Load everything from the server, then show the page. Visitors who are not logged in go to the log in page.
+  (async function start() {
+    try {
+      applyBootstrap(await api('/bootstrap'));
+    } catch (err) {
+      if (err.status === 401) { location.replace('/auth.html'); return; }
+      $('#view').innerHTML = `<section class="card"><h2 style="font-size:18px;font-weight:800;margin-bottom:6px">Kinetic could not load</h2><p class="sub">${esc(err.message)}</p><div class="form-actions"><button class="btn btn-primary" type="button" data-act="reload">Try again</button></div></section>`;
+      return;
+    }
+    const adminLink = $('#admin-link');
+    if (adminLink) adminLink.hidden = USER.role !== 'admin';
+    route();
+  })();
 })();
